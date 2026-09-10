@@ -27,5 +27,6 @@ find "$STAGE" -name '._*' -type f -delete
 find "$SCRIPTS_STAGE" -name '._*' -type f -delete
 
 pkgbuild --root "$STAGE" --scripts "$SCRIPTS_STAGE" --identifier app.aster --version 1.0.0 --install-location / build/Aster.pkg
+cp -f build/Aster.pkg build/Aster-unsigned.pkg
 echo "PKG: build/Aster.pkg"
 echo "首次安装将请求一次管理员权限；未签名开源构建可能需要在系统设置中确认。"

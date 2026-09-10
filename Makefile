@@ -1,12 +1,14 @@
 .PHONY: all build app pkg run stop clean test zip benchmark integration-test
 
+SWIFT_VER ?= $(shell swiftc --version 2>&1 | grep -Eq 'Swift version [6-9]' && echo 6 || echo 5)
+
 all: app
 
 build:
 	@mkdir -p bin build/ModuleCache
 	GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o bin/aster-daemon ./cmd/aster-daemon
 	GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o bin/aster-helper ./cmd/aster-helper
-	swiftc -module-cache-path $(CURDIR)/build/ModuleCache -Xcc -fmodules-cache-path=$(CURDIR)/build/ModuleCache -swift-version 6 -strict-concurrency=complete -parse-as-library -O \
+	swiftc -module-cache-path $(CURDIR)/build/ModuleCache -Xcc -fmodules-cache-path=$(CURDIR)/build/ModuleCache -swift-version $(SWIFT_VER) -parse-as-library -O \
 	  macos-native/Sources/Aster/Models.swift \
 	  macos-native/Sources/Aster/RealtimeStores.swift \
 	  macos-native/Sources/Aster/WebDAVCredentialStore.swift \

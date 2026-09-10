@@ -114,9 +114,10 @@ public struct SurgeProLogsView: View {
     @State private var addRuleContext: AddRuleContext? = nil
 
     @MainActor
-    public init(state: AsterState = .shared, loadsRealtimeData: Bool = true) {
-        self.state = state
-        _connectionStore = ObservedObject(wrappedValue: state.connectionStore)
+    public init(state: AsterState? = nil, loadsRealtimeData: Bool = true) {
+        let actual = state ?? .shared
+        self.state = actual
+        _connectionStore = ObservedObject(wrappedValue: actual.connectionStore)
         self.loadsRealtimeData = loadsRealtimeData
     }
 

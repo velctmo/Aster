@@ -259,6 +259,9 @@ func TestSingBoxValidationIfAvailable(t *testing.T) {
 	if err != nil {
 		t.Skip("本地环境未检测到可用的 sing-box 二进制，跳过集成验证测试")
 	}
+	if !isSingBoxAtLeast114(bin) {
+		t.Skipf("检测到的 sing-box 二进制 (%s) 版本低于 1.14.0，跳过针对 1.14+ 语法的集成校验测试", bin)
+	}
 
 	f := state.DefaultFile()
 	f.Settings.MixedPort = 29080
@@ -492,6 +495,17 @@ func bundledSingBox() (string, error) {
 		if st, err := os.Stat(candidate); err == nil && !st.IsDir() {
 			return candidate, nil
 		}
+		coresDir := filepath.Join(root, "vendor", "cores")
+		if entries, err := os.ReadDir(coresDir); err == nil {
+			for _, entry := range entries {
+				if strings.HasPrefix(entry.Name(), "sing-box") && !entry.IsDir() {
+					full := filepath.Join(coresDir, entry.Name())
+					if st, err := os.Stat(full); err == nil && st.Mode()&0o111 != 0 {
+						return full, nil
+					}
+				}
+			}
+		}
 		parent := filepath.Dir(root)
 		if parent == root {
 			break
@@ -499,6 +513,28 @@ func bundledSingBox() (string, error) {
 		root = parent
 	}
 	return "", os.ErrNotExist
+}
+
+func isSingBoxAtLeast114(bin string) bool {
+	out, err := exec.Command(bin, "version").Output()
+	if err != nil {
+		return false
+	}
+	fields := strings.Fields(string(out))
+	for i, f := range fields {
+		if f == "version" && i+1 < len(fields) {
+			ver := fields[i+1]
+			parts := strings.Split(ver, ".")
+			if len(parts) >= 2 {
+				major, err1 := strconv.Atoi(parts[0])
+				minor, err2 := strconv.Atoi(parts[1])
+				if err1 == nil && err2 == nil {
+					return major > 1 || (major == 1 && minor >= 14)
+				}
+			}
+		}
+	}
+	return false
 }
 
 func TestConfigScriptFailSafeProtections(t *testing.T) {

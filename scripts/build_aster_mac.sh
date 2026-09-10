@@ -55,7 +55,8 @@ SWIFT_BUILT=0
 if [[ -d macos-native/Aster.xcodeproj ]] && command -v xcodebuild >/dev/null 2>&1 \
   && xcodebuild -version >/dev/null 2>&1; then
   if xcodebuild -project macos-native/Aster.xcodeproj -scheme Aster -configuration Release \
-    -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO build >/dev/null; then
+    -destination 'platform=macOS,arch=arm64' \
+    -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO build >/dev/null 2>&1; then
     BUILT_APP=$(find build/DerivedData -name 'Aster.app' -type d | head -1 || true)
     if [[ -n "${BUILT_APP:-}" ]]; then
       cp "$BUILT_APP/Contents/MacOS/Aster" bin/Aster
@@ -66,7 +67,11 @@ fi
 if [[ "$SWIFT_BUILT" -ne 1 ]]; then
   echo "  使用 swiftc 编译（无可用 Xcode / xcodebuild 失败）..."
   mkdir -p build/ModuleCache
-  swiftc -module-cache-path "$(pwd)/build/ModuleCache" -Xcc -fmodules-cache-path="$(pwd)/build/ModuleCache" -swift-version 6 -strict-concurrency=complete -parse-as-library -O "${SWIFT_SOURCES[@]}" -o bin/Aster
+  SWIFT_VER="6"
+  if ! swiftc --version 2>&1 | grep -Eq 'Swift version [6-9]'; then
+    SWIFT_VER="5"
+  fi
+  swiftc -module-cache-path "$(pwd)/build/ModuleCache" -Xcc -fmodules-cache-path="$(pwd)/build/ModuleCache" -swift-version "$SWIFT_VER" -parse-as-library -O "${SWIFT_SOURCES[@]}" -o bin/Aster
 fi
 chmod +x bin/Aster
 rm -rf build/ModuleCache

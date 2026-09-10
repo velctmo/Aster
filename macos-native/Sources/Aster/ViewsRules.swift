@@ -36,10 +36,11 @@ public struct RulesView: View {
     ]
 
     @MainActor
-    public init(state: AsterState = .shared) {
-        self.state = state
-        _ruleStore = ObservedObject(wrappedValue: state.ruleStore)
-        _runtimeStore = ObservedObject(wrappedValue: state.runtimeStore)
+    public init(state: AsterState? = nil) {
+        let actual = state ?? .shared
+        self.state = actual
+        _ruleStore = ObservedObject(wrappedValue: actual.ruleStore)
+        _runtimeStore = ObservedObject(wrappedValue: actual.runtimeStore)
     }
 
     public enum RuleFilter: String, CaseIterable, Identifiable {

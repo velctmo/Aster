@@ -1,0 +1,72 @@
+name: Bug 报告 (Bug Report)
+description: 提交 Aster 运行中的异常或缺陷反馈
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢您反馈问题！提交前请确认使用的是最新版本的 Aster。
+  - type: input
+    id: version
+    attributes:
+      label: Aster 版本 (Aster Version)
+      description: 您正在运行的 Aster 版本（如 v1.0.0）
+      placeholder: "v1.0.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: macOS 系统版本 (macOS Version)
+      options:
+        - "macOS 15 (Sequoia)"
+        - "macOS 14 (Sonoma)"
+        - "Other"
+    validations:
+      required: true
+  - type: dropdown
+    id: chip
+    attributes:
+      label: 芯片架构 (Apple Silicon Chip)
+      options:
+        - "Apple M1 / Pro / Max / Ultra"
+        - "Apple M2 / Pro / Max / Ultra"
+        - "Apple M3 / Pro / Max"
+        - "Apple M4 / Pro / Max"
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: 代理接管模式 (Proxy Mode)
+      options:
+        - "系统代理 (System Proxy)"
+        - "增强模式 (TUN / utun)"
+        - "直接连接 (Direct)"
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: 问题描述 (Description)
+      description: 请清晰、简洁地描述发生的异常行为
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤 (Steps to Reproduce)
+      description: 如何重现此问题
+      placeholder: |
+        1. 打开 Aster 并启动节点
+        2. 点击...
+        3. 观察到...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 诊断日志 (Sanitized Logs)
+      description: 可在「设置」中点击「导出诊断报告」，粘贴相关脱敏日志（请确保去除私人订阅链接与节点密钥）
+      render: shell

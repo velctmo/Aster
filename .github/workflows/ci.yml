@@ -25,6 +25,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.22.x"
+      - name: Select Xcode 16
+        run: |
+          XCODE_16=$(find /Applications -maxdepth 1 -name 'Xcode_16*.app' 2>/dev/null | sort -V | tail -n 1)
+          if [ -n "$XCODE_16" ]; then
+            echo "Selecting $XCODE_16"
+            sudo xcode-select -s "$XCODE_16/Contents/Developer"
+          fi
+          xcodebuild -version || true
+          swiftc --version || true
       - name: Validate packaging script
         run: |
           bash -n scripts/build_aster_mac.sh

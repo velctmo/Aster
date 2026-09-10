@@ -1,0 +1,72 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+
+      - name: Select Xcode 16
+        run: |
+          XCODE_16=$(find /Applications -maxdepth 1 -name 'Xcode_16*.app' 2>/dev/null | sort -V | tail -n 1)
+          if [ -n "$XCODE_16" ]; then
+            echo "Selecting $XCODE_16"
+            sudo xcode-select -s "$XCODE_16/Contents/Developer"
+          fi
+          xcodebuild -version || true
+          swiftc --version || true
+
+      - name: Run Go test suite
+        run: GOOS=darwin GOARCH=arm64 go test -race ./...
+
+      - name: Build Application (.app & .zip)
+        run: make app
+        env:
+          SING_BOX_VERSION: "1.14.0"
+
+      - name: Build Installer Package (.pkg)
+        run: make pkg
+        env:
+          SING_BOX_VERSION: "1.14.0"
+
+      - name: Verify build artifacts
+        run: |
+          test -f build/Aster-macos-arm64.zip
+          test -f build/Aster.pkg
+          file build/Aster.app/Contents/MacOS/Aster | grep -q "arm64"
+          file build/Aster.app/Contents/Resources/aster-daemon | grep -q "arm64"
+          file build/Aster.app/Contents/Resources/sing-box | grep -q "arm64"
+
+      - name: Generate Checksums
+        run: |
+          cd build
+          shasum -a 256 Aster-macos-arm64.zip Aster.pkg > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/Aster-macos-arm64.zip
+            build/Aster.pkg
+            build/SHA256SUMS.txt
+          generate_release_notes: true
+          draft: false
+          prerelease: false
