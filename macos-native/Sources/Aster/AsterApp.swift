@@ -20,30 +20,12 @@ private enum AsterStatusGlyph {
             NSColor.black.setStroke()
             NSColor.black.setFill()
 
-            for index in 0..<6 {
-                let angle = CGFloat(index) * .pi / 3 - .pi / 2
-                let start = NSPoint(
-                    x: center.x + cos(angle) * 3.65,
-                    y: center.y + sin(angle) * 3.65
-                )
-                let end = NSPoint(
-                    x: center.x + cos(angle) * 6.35,
-                    y: center.y + sin(angle) * 6.35
-                )
-                let route = NSBezierPath()
-                route.move(to: start)
-                route.line(to: end)
-                route.lineWidth = 1.7
-                route.lineCapStyle = .square
-                route.stroke()
-            }
-
-            let hub = hexagon(center: center, radius: 3.3)
+            let star = asterStar(center: center, outerRadius: 6.8, innerRadius: 2.6)
             if active {
-                hub.fill()
+                star.fill()
             } else {
-                hub.lineWidth = 1.45
-                hub.stroke()
+                star.lineWidth = 1.3
+                star.stroke()
             }
             return true
         }
@@ -51,10 +33,12 @@ private enum AsterStatusGlyph {
         return image
     }
 
-    private static func hexagon(center: NSPoint, radius: CGFloat) -> NSBezierPath {
+    private static func asterStar(center: NSPoint, outerRadius: CGFloat, innerRadius: CGFloat) -> NSBezierPath {
         let path = NSBezierPath()
-        for index in 0..<6 {
-            let angle = CGFloat(index) * .pi / 3 - .pi / 2
+        let points = 6
+        for index in 0..<(points * 2) {
+            let angle = CGFloat(index) * .pi / CGFloat(points) - .pi / 2
+            let radius = (index % 2 == 0) ? outerRadius : innerRadius
             let point = NSPoint(
                 x: center.x + cos(angle) * radius,
                 y: center.y + sin(angle) * radius
