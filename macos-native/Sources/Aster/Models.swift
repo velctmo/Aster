@@ -17,16 +17,8 @@ public struct AppStatus: Codable, Equatable, Sendable {
     public var download: Int64
     public var coreVersion: String
     public var hasNodes: Bool
-    public var wanted: Bool
     public var recentNodes: [String]?
-    public var mixedBusy: Bool
-    public var clashBusy: Bool
-    public var privileged: Bool
     public var mixedPort: Int?
-    public var httpPort: Int?
-    public var socksPort: Int?
-    public var clashPort: Int?
-    public var controlPort: Int?
     public var delayURL: String?
     public var apiVersion: String?
     public var activeConfigId: String?
@@ -45,7 +37,7 @@ public struct AppStatus: Codable, Equatable, Sendable {
         tunFailed: false,
         error: "",
         mode: "rule",
-        capture: CaptureSettings(systemProxy: true, tun: false),
+        capture: CaptureSettings(systemProxy: false, tun: false),
         selected: "auto",
         selectedLabel: "自动选择",
         delayMs: 0,
@@ -53,16 +45,8 @@ public struct AppStatus: Codable, Equatable, Sendable {
         download: 0,
         coreVersion: "Sing-box 官方内核",
         hasNodes: false,
-        wanted: false,
         recentNodes: [],
-        mixedBusy: false,
-        clashBusy: false,
-        privileged: false,
-        mixedPort: 2080,
-        httpPort: 2080,
-        socksPort: 2080,
-        clashPort: 2090,
-        controlPort: 1780,
+        mixedPort: 6780,
         delayURL: "https://www.gstatic.com/generate_204",
         apiVersion: "1",
         activeConfigId: nil,

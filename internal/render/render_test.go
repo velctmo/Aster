@@ -101,7 +101,7 @@ func TestConfigHasSelectorAndClashAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(b)
-	for _, need := range []string{`"tag": "proxy"`, `"tag": "auto"`, `"type": "selector"`, `"type": "urltest"`, `127.0.0.1:2090`, `"hijack-dns"`, `"find_process"`, `198.18.0.0/15`, `223.5.5.5`} {
+	for _, need := range []string{`"tag": "proxy"`, `"tag": "auto"`, `"type": "selector"`, `"type": "urltest"`, `127.0.0.1:9090`, `"hijack-dns"`, `"find_process"`, `198.18.0.0/15`, `223.5.5.5`} {
 		if !strings.Contains(s, need) {
 			t.Fatalf("missing %s in %s", need, s[:min(len(s), 400)])
 		}
@@ -138,7 +138,7 @@ func TestConfigUsesExplicitDirectHTTPClientForRemoteRuleSets(t *testing.T) {
 	}
 }
 
-func TestConfigTunUsesGVisorStack(t *testing.T) {
+func TestConfigTunUsesMixedStack(t *testing.T) {
 	f := state.DefaultFile()
 	f.Wanted = true
 	f.Capture.Tun = true
@@ -152,7 +152,7 @@ func TestConfigTunUsesGVisorStack(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(b)
-	for _, need := range []string{`"type": "tun"`, `"stack": "gvisor"`, `"auto_route": true`} {
+	for _, need := range []string{`"type": "tun"`, `"stack": "mixed"`, `"auto_route": true`, `"mtu": 1500`} {
 		if !strings.Contains(s, need) {
 			t.Fatalf("missing %s", need)
 		}
@@ -574,8 +574,8 @@ func TestConfigScriptFailSafeProtections(t *testing.T) {
 	}
 
 	var parsed struct {
-		Inbounds []map[string]any `json:"inbounds"`
-		Outbounds []map[string]any `json:"outbounds"`
+		Inbounds     []map[string]any `json:"inbounds"`
+		Outbounds    []map[string]any `json:"outbounds"`
 		Experimental struct {
 			ClashAPI map[string]any `json:"clash_api"`
 		} `json:"experimental"`

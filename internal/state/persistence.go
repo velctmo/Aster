@@ -22,7 +22,6 @@ type settingsDocument struct {
 	DelayTimeoutMs   int      `json:"delayTimeoutMs"`
 	DelayConcurrency int      `json:"delayConcurrency"`
 	StrictRoute      bool     `json:"strictRoute"`
-	PassiveSampling  bool     `json:"passiveSampling"`
 	SubIntervalHours int      `json:"subIntervalHours"`
 	LogRetention     string   `json:"logRetention"`
 	LogLevel         string   `json:"logLevel"`
@@ -42,12 +41,9 @@ type machineDocument struct {
 	CorePath    string       `json:"corePath"`
 	MixedPort   int          `json:"mixedPort"`
 	ClashPort   int          `json:"clashPort"`
-	ControlPort int          `json:"controlPort"`
 	AllowLan    bool         `json:"allowLan"`
 	Autostart   bool         `json:"autostart"`
-	AutoConnect bool         `json:"autoConnect"`
 	Capture     Capture      `json:"capture"`
-	Wanted      bool         `json:"wanted"`
 	ClashSecret string       `json:"clashSecret"`
 	APIToken    string       `json:"apiToken"`
 	RecentNodes []string     `json:"recentNodes"`
@@ -246,8 +242,8 @@ func settingsDocumentFromFile(f File, profileIDs, scriptIDs []string) settingsDo
 		ProxyBypass: append([]string(nil), f.Settings.ProxyBypass...),
 		DelayURL:    f.Settings.DelayURL, DelayTimeoutMs: f.Settings.DelayTimeoutMs,
 		DelayConcurrency: f.Settings.DelayConcurrency, StrictRoute: f.Settings.StrictRoute,
-		PassiveSampling: f.Settings.PassiveSampling, SubIntervalHours: f.Settings.SubIntervalHours,
-		LogRetention: f.Settings.LogRetention, LogLevel: f.Settings.LogLevel,
+		SubIntervalHours: f.Settings.SubIntervalHours,
+		LogRetention:     f.Settings.LogRetention, LogLevel: f.Settings.LogLevel,
 		NodeView: f.Settings.NodeView, Theme: f.Settings.Theme,
 		Mode: f.Mode, Selected: f.Selected, ActiveConfigID: f.ActiveConfigID,
 		ProfileIDs: profileIDs, ScriptIDs: scriptIDs,
@@ -258,9 +254,8 @@ func machineDocumentFromFile(f File) machineDocument {
 	return machineDocument{
 		Version: persistenceVersion, CorePath: f.Settings.CorePath,
 		MixedPort: f.Settings.MixedPort, ClashPort: f.Settings.ClashPort,
-		ControlPort: f.Settings.ControlPort, AllowLan: f.Settings.AllowLan,
-		Autostart: f.Settings.Autostart, AutoConnect: f.Settings.AutoConnect,
-		Capture: f.Capture, Wanted: f.Wanted, ClashSecret: f.ClashSecret,
+		AllowLan: f.Settings.AllowLan, Autostart: f.Settings.Autostart,
+		Capture: f.Capture, ClashSecret: f.ClashSecret,
 		APIToken: f.APIToken, RecentNodes: append([]string(nil), f.RecentNodes...),
 		Runtime: f.Runtime,
 	}
@@ -274,7 +269,6 @@ func applySettingsDocument(f *File, doc settingsDocument) {
 	f.Settings.DelayTimeoutMs = doc.DelayTimeoutMs
 	f.Settings.DelayConcurrency = doc.DelayConcurrency
 	f.Settings.StrictRoute = doc.StrictRoute
-	f.Settings.PassiveSampling = doc.PassiveSampling
 	f.Settings.SubIntervalHours = doc.SubIntervalHours
 	f.Settings.LogRetention = doc.LogRetention
 	f.Settings.LogLevel = doc.LogLevel
@@ -289,12 +283,9 @@ func applyMachineDocument(f *File, doc machineDocument) {
 	f.Settings.CorePath = doc.CorePath
 	f.Settings.MixedPort = doc.MixedPort
 	f.Settings.ClashPort = doc.ClashPort
-	f.Settings.ControlPort = doc.ControlPort
 	f.Settings.AllowLan = doc.AllowLan
 	f.Settings.Autostart = doc.Autostart
-	f.Settings.AutoConnect = doc.AutoConnect
 	f.Capture = doc.Capture
-	f.Wanted = doc.Wanted
 	f.ClashSecret = doc.ClashSecret
 	f.APIToken = doc.APIToken
 	f.RecentNodes = append([]string(nil), doc.RecentNodes...)

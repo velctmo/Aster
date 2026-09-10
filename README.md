@@ -52,7 +52,6 @@ Aster 是一款专注于极致能效、原生体验与深度网络感知的 macO
   - 首次通过 PKG 安装网络组件后，启停 TUN 增强模式无需重复输入管理员密码；
   - 严格限制仅当前控制台 UID 可调度特权 Helper，附带 20 秒异常退出安全停机租约。
 - **⚙️ 智能感知与配置编排**：
-  - **被动伴随采样**：日常上网自动静默提取 TCP 握手 RTT 并平滑更新节点延迟；
   - **规则覆写流水线**：更新订阅不丢失自定义分流策略与 DNS 设定；
   - **多端同步**：零配置自动接入 macOS iCloud Drive，支持 WebDAV 凭据备份与迁移。
 
@@ -63,8 +62,8 @@ Aster 是一款专注于极致能效、原生体验与深度网络感知的 macO
 ```mermaid
 graph TD
     UI["Aster.app (SwiftUI + AppKit)<br/>30~50MB 内存 · Swift 6 原生界面"]
-    DAEMON["aster-daemon (:1780)<br/>Go Headless 守护进程 · 本地 Bearer 鉴权"]
-    CORE["sing-box (普通代理模式)<br/>用户态子进程 (:2080 Mixed, :2090 Clash API)"]
+    DAEMON["aster-daemon (unix socket)<br/>Go Headless 守护进程 · 本地 Bearer 鉴权"]
+    CORE["sing-box (普通代理模式)<br/>用户态子进程 (:6780 Mixed, 127.0.0.1:9090 Clash API)"]
     HELPER["aster-helper<br/>root launchd Helper (Unix Socket)"]
     TUN_CORE["sing-box (TUN 增强模式)<br/>root 托管 · utun 全局接管"]
 

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"aster/internal/state"
 )
 
 type Client struct {
@@ -50,7 +52,7 @@ type Metadata struct {
 
 func New(secret string, port int) *Client {
 	if port <= 0 {
-		port = 2090
+		port = state.DefaultClashPort
 	}
 	return &Client{
 		secret: secret,
@@ -67,7 +69,7 @@ func (c *Client) SetSecret(s string) {
 
 func (c *Client) SetPort(port int) {
 	if port <= 0 {
-		port = 2090
+		port = state.DefaultClashPort
 	}
 	c.mu.Lock()
 	c.base = fmt.Sprintf("http://127.0.0.1:%d", port)

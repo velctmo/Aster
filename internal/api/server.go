@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -16,9 +15,6 @@ import (
 
 	"aster/internal/app"
 	"aster/internal/clash"
-	"aster/internal/core"
-	"aster/internal/logstore"
-	"aster/internal/macos"
 	"aster/internal/state"
 )
 
@@ -55,7 +51,6 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/status", s.getStatus)
 	mux.HandleFunc("GET /api/v1/ip", s.getIPInfo)
-	mux.HandleFunc("POST /api/v1/power", s.postPower)
 	mux.HandleFunc("PATCH /api/v1/capture", s.patchCapture)
 	mux.HandleFunc("PATCH /api/v1/mode", s.patchMode)
 	mux.HandleFunc("GET /api/v1/configs", s.getConfigs)
@@ -84,27 +79,17 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/rules/from-log", s.ruleFromLog)
 	mux.HandleFunc("POST /api/v1/rules/reorder", s.reorderRules)
 	mux.HandleFunc("DELETE /api/v1/rules/{id}", s.deleteRule)
-	mux.HandleFunc("GET /api/v1/logs", s.getLogs)
 	mux.HandleFunc("GET /api/v1/connections", s.getConnections)
 	mux.HandleFunc("DELETE /api/v1/connections", s.closeAll)
 	mux.HandleFunc("DELETE /api/v1/connections/{id}", s.closeOne)
 	mux.HandleFunc("GET /api/v1/settings", s.getSettings)
-	mux.HandleFunc("PUT /api/v1/settings", s.putSettings)
 	mux.HandleFunc("PATCH /api/v1/settings", s.patchSettings)
 	mux.HandleFunc("GET /api/v1/backup/export", s.export)
 	mux.HandleFunc("POST /api/v1/backup/import", s.importZip)
 	mux.HandleFunc("GET /api/v1/backup/icloud", s.getICloudStatus)
 	mux.HandleFunc("POST /api/v1/backup/icloud/export", s.postICloudExport)
 	mux.HandleFunc("POST /api/v1/backup/icloud/import", s.postICloudImport)
-	mux.HandleFunc("GET /api/v1/lan", s.lan)
-	mux.HandleFunc("GET /api/v1/proxy-env", s.proxyEnv)
-	mux.HandleFunc("GET /api/v1/core", s.getCore)
-	mux.HandleFunc("GET /api/v1/core/releases", s.getCoreReleases)
-	mux.HandleFunc("POST /api/v1/core/download", s.postCoreDownload)
-	mux.HandleFunc("POST /api/v1/core/import", s.postCoreImport)
-	mux.HandleFunc("POST /api/v1/open-data-dir", s.openDir)
 	mux.HandleFunc("POST /api/v1/clear-proxy", s.clearProxy)
-	mux.HandleFunc("POST /api/v1/window/open", s.openWindow)
 	mux.HandleFunc("POST /api/v1/restart", s.postRestart)
 	mux.HandleFunc("GET /api/v1/network/diagnostics", s.getDiagnostics)
 	mux.HandleFunc("GET /api/v1/diagnostics/report", s.getDiagnosticsReport)
@@ -178,25 +163,6 @@ func (s *Server) getStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getIPInfo(w http.ResponseWriter, r *http.Request) {
 	force := r.URL.Query().Get("force") == "1" || r.URL.Query().Get("force") == "true"
 	writeJSON(w, s.App.GetIPInfo(force))
-}
-
-func (s *Server) postPower(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		On *bool `json:"on"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeErr(w, err)
-		return
-	}
-	if body.On == nil {
-		writeErr(w, fmt.Errorf("缺少 on"))
-		return
-	}
-	if err := s.App.SetPower(*body.On); err != nil {
-		writeErr(w, err)
-		return
-	}
-	writeJSON(w, s.App.Status())
 }
 
 func (s *Server) patchCapture(w http.ResponseWriter, r *http.Request) {
@@ -591,21 +557,6 @@ func (s *Server) deleteRule(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.App.Store().Get().Rules)
 }
 
-func (s *Server) getLogs(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	limit, _ := strconv.Atoi(q.Get("limit"))
-	since, _ := strconv.ParseInt(q.Get("since"), 10, 64)
-	rows, err := s.App.Logs(q.Get("kind"), limit, since)
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	if rows == nil {
-		rows = []logstore.Row{}
-	}
-	writeJSON(w, rows)
-}
-
 func (s *Server) getConnections(w http.ResponseWriter, r *http.Request) {
 	snap, err := s.App.ClashConnections()
 	if err != nil || snap == nil {
@@ -629,34 +580,17 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.App.Store().Get().Settings)
 }
 
-func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
-	var set state.Settings
-	if err := decodeJSON(r, &set); err != nil {
-		writeErr(w, err)
-		return
-	}
-	if err := s.App.PutSettings(set); err != nil {
-		writeErr(w, err)
-		return
-	}
-	writeJSON(w, s.App.Store().Get().Settings)
-}
-
 func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		DelayURL         *string `json:"delayURL"`
 		MixedPort        *int    `json:"mixedPort"`
-		ClashPort        *int    `json:"clashPort"`
 		AllowLan         *bool   `json:"allowLan"`
 		DirectCN         *bool   `json:"directCN"`
 		Autostart        *bool   `json:"autostart"`
-		AutoConnect      *bool   `json:"autoConnect"`
-		PassiveSampling  *bool   `json:"passiveSampling"`
 		DNSMode          *string `json:"dnsMode"`
 		StrictRoute      *bool   `json:"strictRoute"`
 		DelayTimeoutMs   *int    `json:"delayTimeoutMs"`
 		DelayConcurrency *int    `json:"delayConcurrency"`
-		ControlPort      *int    `json:"controlPort"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeErr(w, err)
@@ -677,8 +611,6 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 		set   func(int)
 	}{
 		{body.MixedPort, "mixedPort", func(v int) { cur.MixedPort = v }},
-		{body.ClashPort, "clashPort", func(v int) { cur.ClashPort = v }},
-		{body.ControlPort, "controlPort", func(v int) { cur.ControlPort = v }},
 		{body.DelayTimeoutMs, "delayTimeoutMs", func(v int) { cur.DelayTimeoutMs = v }},
 		{body.DelayConcurrency, "delayConcurrency", func(v int) { cur.DelayConcurrency = v }},
 	} {
@@ -689,7 +621,7 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, fmt.Errorf("%s 必须大于 0", patch.name))
 			return
 		}
-		if (patch.name == "mixedPort" || patch.name == "clashPort" || patch.name == "controlPort") && *patch.value > 65535 {
+		if (patch.name == "mixedPort") && *patch.value > 65535 {
 			writeErr(w, fmt.Errorf("%s 必须小于等于 65535", patch.name))
 			return
 		}
@@ -704,12 +636,6 @@ func (s *Server) patchSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Autostart != nil {
 		cur.Autostart, changed = *body.Autostart, true
-	}
-	if body.AutoConnect != nil {
-		cur.AutoConnect, changed = *body.AutoConnect, true
-	}
-	if body.PassiveSampling != nil {
-		cur.PassiveSampling, changed = *body.PassiveSampling, true
 	}
 	if body.DNSMode != nil {
 		if *body.DNSMode != "fake-ip" && *body.DNSMode != "redir-host" {
@@ -769,19 +695,6 @@ func (s *Server) postICloudImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, s.App.ICloudStatus())
-}
-
-func (s *Server) lan(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.App.LAN())
-}
-
-func (s *Server) proxyEnv(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]string{"env": s.App.ProxyEnv()})
-}
-
-func (s *Server) openDir(w http.ResponseWriter, r *http.Request) {
-	macos.OpenURL(s.App.Store().Dir())
-	writeJSON(w, map[string]bool{"ok": true})
 }
 
 func (s *Server) clearProxy(w http.ResponseWriter, r *http.Request) {
@@ -863,80 +776,6 @@ func (s *Server) wsKind(kind string) http.HandlerFunc {
 			}
 		}
 	}
-}
-
-func (s *Server) getCore(w http.ResponseWriter, r *http.Request) {
-	st := s.App.Store().Get()
-	writeJSON(w, core.Info(st.Settings.CorePath))
-}
-
-func (s *Server) getCoreReleases(w http.ResponseWriter, r *http.Request) {
-	list, err := core.ListReleases()
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	writeJSON(w, list)
-}
-
-func (s *Server) postCoreDownload(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Tag    *string `json:"tag"`
-		SHA256 *string `json:"sha256"`
-	}
-	if err := decodeJSON(r, &body); err != nil {
-		writeErr(w, err)
-		return
-	}
-	if body.Tag == nil || strings.TrimSpace(*body.Tag) == "" {
-		writeErr(w, fmt.Errorf("缺少内核版本 tag"))
-		return
-	}
-	if body.SHA256 == nil || strings.TrimSpace(*body.SHA256) == "" {
-		writeErr(w, fmt.Errorf("缺少内核 SHA-256 校验值"))
-		return
-	}
-	path, err := core.Download(strings.TrimSpace(*body.Tag), strings.TrimSpace(*body.SHA256), s.App.Store().CoresDir())
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	settings := s.App.Store().Get().Settings
-	settings.CorePath = path
-	if err := s.App.PutSettings(settings); err != nil {
-		writeErr(w, err)
-		return
-	}
-	writeJSON(w, core.Info(path))
-}
-
-func (s *Server) postCoreImport(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(64 << 20); err != nil {
-		writeErr(w, err)
-		return
-	}
-	file, _, err := r.FormFile("file")
-	if err != nil {
-		writeErr(w, fmt.Errorf("请选择内核文件"))
-		return
-	}
-	defer file.Close()
-	path, err := core.Import(file, s.App.Store().CoresDir())
-	if err != nil {
-		writeErr(w, err)
-		return
-	}
-	settings := s.App.Store().Get().Settings
-	settings.CorePath = path
-	if err := s.App.PutSettings(settings); err != nil {
-		writeErr(w, err)
-		return
-	}
-	writeJSON(w, core.Info(path))
-}
-
-func (s *Server) openWindow(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]string{"status": "ok"})
 }
 
 func (s *Server) postRestart(w http.ResponseWriter, r *http.Request) {

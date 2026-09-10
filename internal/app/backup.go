@@ -50,7 +50,6 @@ type portableBackupSettings struct {
 	DelayTimeoutMs   int      `json:"delayTimeoutMs"`
 	DelayConcurrency int      `json:"delayConcurrency"`
 	StrictRoute      bool     `json:"strictRoute"`
-	PassiveSampling  bool     `json:"passiveSampling"`
 	SubIntervalHours int      `json:"subIntervalHours"`
 	LogRetention     string   `json:"logRetention"`
 	LogLevel         string   `json:"logLevel"`
@@ -100,7 +99,6 @@ type portableSettingsDocument struct {
 	DelayTimeoutMs   int      `json:"delayTimeoutMs"`
 	DelayConcurrency int      `json:"delayConcurrency"`
 	StrictRoute      bool     `json:"strictRoute"`
-	PassiveSampling  bool     `json:"passiveSampling"`
 	SubIntervalHours int      `json:"subIntervalHours"`
 	LogRetention     string   `json:"logRetention"`
 	LogLevel         string   `json:"logLevel"`
@@ -169,8 +167,8 @@ func portableBackupFromState(f state.File) portableBackup {
 			ProxyBypass: append([]string(nil), f.Settings.ProxyBypass...),
 			DelayURL:    f.Settings.DelayURL, DelayTimeoutMs: f.Settings.DelayTimeoutMs,
 			DelayConcurrency: f.Settings.DelayConcurrency, StrictRoute: f.Settings.StrictRoute,
-			PassiveSampling: f.Settings.PassiveSampling, SubIntervalHours: f.Settings.SubIntervalHours,
-			LogRetention: f.Settings.LogRetention, LogLevel: f.Settings.LogLevel,
+			SubIntervalHours: f.Settings.SubIntervalHours,
+			LogRetention:     f.Settings.LogRetention, LogLevel: f.Settings.LogLevel,
 			NodeView: f.Settings.NodeView, Theme: f.Settings.Theme,
 		},
 		Mode: f.Mode, Selected: f.Selected, Profiles: profiles,
@@ -377,8 +375,8 @@ func portableBackupEntries(backup portableBackup) (map[string][]byte, error) {
 		ProxyBypass: append([]string(nil), backup.Settings.ProxyBypass...),
 		DelayURL:    backup.Settings.DelayURL, DelayTimeoutMs: backup.Settings.DelayTimeoutMs,
 		DelayConcurrency: backup.Settings.DelayConcurrency, StrictRoute: backup.Settings.StrictRoute,
-		PassiveSampling: backup.Settings.PassiveSampling, SubIntervalHours: backup.Settings.SubIntervalHours,
-		LogRetention: backup.Settings.LogRetention, LogLevel: backup.Settings.LogLevel,
+		SubIntervalHours: backup.Settings.SubIntervalHours,
+		LogRetention:     backup.Settings.LogRetention, LogLevel: backup.Settings.LogLevel,
 		NodeView: backup.Settings.NodeView, Theme: backup.Settings.Theme,
 		Mode: backup.Mode, Selected: backup.Selected, ActiveConfigID: backup.ActiveConfigID,
 		ProfileIDs: profileIDs, ScriptIDs: scriptIDs,
@@ -401,8 +399,8 @@ func portableSettingsDocumentSettings(document portableSettingsDocument) portabl
 		ProxyBypass: append([]string(nil), document.ProxyBypass...),
 		DelayURL:    document.DelayURL, DelayTimeoutMs: document.DelayTimeoutMs,
 		DelayConcurrency: document.DelayConcurrency, StrictRoute: document.StrictRoute,
-		PassiveSampling: document.PassiveSampling, SubIntervalHours: document.SubIntervalHours,
-		LogRetention: document.LogRetention, LogLevel: document.LogLevel,
+		SubIntervalHours: document.SubIntervalHours,
+		LogRetention:     document.LogRetention, LogLevel: document.LogLevel,
 		NodeView: document.NodeView, Theme: document.Theme,
 	}
 }
@@ -485,7 +483,6 @@ func portableBackupState(backup portableBackup, current state.File) state.File {
 	settings.DelayTimeoutMs = backup.Settings.DelayTimeoutMs
 	settings.DelayConcurrency = backup.Settings.DelayConcurrency
 	settings.StrictRoute = backup.Settings.StrictRoute
-	settings.PassiveSampling = backup.Settings.PassiveSampling
 	settings.SubIntervalHours = backup.Settings.SubIntervalHours
 	settings.LogRetention = backup.Settings.LogRetention
 	settings.LogLevel = backup.Settings.LogLevel

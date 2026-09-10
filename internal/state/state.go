@@ -12,8 +12,11 @@ import (
 )
 
 const (
-	LocalSubID     = "local"
-	AppSupportName = "Aster"
+	LocalSubID        = "local"
+	AppSupportName    = "Aster"
+	DefaultMixedPort  = 6780
+	DefaultClashPort  = 9090
+	ControlSocketName = "daemon.sock"
 )
 
 type Capture struct {
@@ -25,7 +28,6 @@ type Settings struct {
 	CorePath         string   `json:"corePath"`
 	MixedPort        int      `json:"mixedPort"`
 	ClashPort        int      `json:"clashPort"`
-	ControlPort      int      `json:"controlPort"`
 	AllowLan         bool     `json:"allowLan"`
 	DirectCN         bool     `json:"directCN"`
 	DNSMode          string   `json:"dnsMode"`
@@ -34,11 +36,9 @@ type Settings struct {
 	DelayTimeoutMs   int      `json:"delayTimeoutMs"`
 	DelayConcurrency int      `json:"delayConcurrency"`
 	StrictRoute      bool     `json:"strictRoute"`
-	PassiveSampling  bool     `json:"passiveSampling"`
 	SubIntervalHours int      `json:"subIntervalHours"`
 	LogRetention     string   `json:"logRetention"`
 	Autostart        bool     `json:"autostart"`
-	AutoConnect      bool     `json:"autoConnect"`
 	LogLevel         string   `json:"logLevel"`
 	NodeView         string   `json:"nodeView"`
 	Theme            string   `json:"theme"`
@@ -256,10 +256,20 @@ func (s *Store) LogsPath() string { return filepath.Join(s.dir, "logs.db") }
 
 func (s *Store) DaemonLogPath() string { return filepath.Join(s.dir, "daemon.log") }
 
-func (s *Store) CoresDir() string {
-	d := filepath.Join(s.dir, "cores")
-	_ = os.MkdirAll(d, 0o700)
-	return d
+func (s *Store) ControlSocketPath() string { return filepath.Join(s.dir, ControlSocketName) }
+
+func EffectiveMixedPort(port int) int {
+	if port <= 0 {
+		return DefaultMixedPort
+	}
+	return port
+}
+
+func EffectiveClashPort(port int) int {
+	if port <= 0 {
+		return DefaultClashPort
+	}
+	return port
 }
 
 func DefaultFile() File {
@@ -269,24 +279,22 @@ func DefaultFile() File {
 	_, _ = rand.Read(token)
 	f := File{
 		Settings: Settings{
-			MixedPort:        2080,
-			ClashPort:        2090,
-			ControlPort:      1780,
+			MixedPort:        DefaultMixedPort,
+			ClashPort:        DefaultClashPort,
 			DirectCN:         true,
 			DNSMode:          "fake-ip",
 			ProxyBypass:      []string{"127.0.0.1", "localhost", "*.local", "*.lan", "10.*", "172.16.*", "172.17.*", "172.18.*", "172.19.*", "172.20.*", "172.21.*", "172.22.*", "172.23.*", "172.24.*", "172.25.*", "172.26.*", "172.27.*", "172.28.*", "172.29.*", "172.30.*", "172.31.*", "192.168.*"},
 			DelayURL:         "https://www.gstatic.com/generate_204",
 			DelayTimeoutMs:   2500,
-			DelayConcurrency: 16,
-			StrictRoute:      true,
-			PassiveSampling:  true,
+			DelayConcurrency: 8,
+			StrictRoute:      false,
 			SubIntervalHours: 6,
 			LogRetention:     "15m",
 			LogLevel:         "warn",
 			NodeView:         "grid",
 			Theme:            "system",
 		},
-		Capture:     Capture{SystemProxy: true},
+		Capture:     Capture{SystemProxy: false},
 		Wanted:      true,
 		Mode:        "rule",
 		Selected:    "auto",
@@ -305,15 +313,11 @@ func (s *Store) load() error {
 
 func mergeDefaults(f File) File {
 	d := DefaultFile()
-	upgrading := f.APIToken == ""
-	if f.Settings.MixedPort == 0 || f.Settings.MixedPort == 7890 {
+	if f.Settings.MixedPort == 0 {
 		f.Settings.MixedPort = d.Settings.MixedPort
 	}
-	if f.Settings.ClashPort == 0 || f.Settings.ClashPort == 9090 {
+	if f.Settings.ClashPort == 0 {
 		f.Settings.ClashPort = d.Settings.ClashPort
-	}
-	if f.Settings.ControlPort == 0 {
-		f.Settings.ControlPort = d.Settings.ControlPort
 	}
 	if f.Settings.DelayURL == "" {
 		f.Settings.DelayURL = d.Settings.DelayURL
@@ -323,9 +327,6 @@ func mergeDefaults(f File) File {
 	}
 	if f.Settings.DelayConcurrency <= 0 {
 		f.Settings.DelayConcurrency = d.Settings.DelayConcurrency
-	}
-	if upgrading {
-		f.Settings.StrictRoute = true
 	}
 	if f.Settings.SubIntervalHours == 0 {
 		f.Settings.SubIntervalHours = d.Settings.SubIntervalHours

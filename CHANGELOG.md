@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-09-11
+
+### Changed
+
+- Control plane is Unix-socket only (`daemon.sock`, mode `0600`). REST and WebSocket no longer use TCP `:1780` or `ASTER_API_BASE`.
+- Mixed inbound defaults to **6780** and is the only user-visible/editable port. Clash API stays internal on `127.0.0.1:9090`.
+- System Proxy and TUN are independent (both may be on). Fresh installs leave capture off; the daemon enables system proxy only after the core is healthy, and restores it on stop/quit/crash.
+- Settings (LAN, strict route, autostart, delay probes) are owned by the daemon. Safer defaults: strict route, LAN sharing, autostart, and passive sampling off.
+- TUN uses the `mixed` stack and MTU 1500. Switching nodes or mode no longer tears down existing connections.
+- Native UI waits for the socket and API token before calling the daemon, reloads the token on 401, and refreshes it before WebSocket reconnect. Tray System Proxy / TUN checkmarks follow OS state and helper capability.
+
+### Removed
+
+- TCP control port, `ControlPort` / `AutoConnect` settings, Clash API port editor, and GitHub sing-box download/import.
+- Unused HTTP endpoints: `POST /power`, `PUT /settings`, `GET /logs`, `GET /lan`, `GET /proxy-env`, `/api/v1/core*`, `POST /open-data-dir`, `POST /window/open`.
+- Passive latency sampling and persistence of the `wanted` power flag (the daemon still starts a core session while it is alive).
+
+### Fixed
+
+- System-proxy leftovers from a previous crash are cleared on startup using an ownership marker.
+- If the helper socket exists but the helper is not running, system-proxy changes fall back to `networksetup`.
+- TUN is offered only when the PKG helper is installed; the settings copy no longer implies an in-app privilege grant.
+
 ## [1.0.0] - 2026-09-10
 
 ### Added

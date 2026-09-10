@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"debug/macho"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -100,6 +101,16 @@ func processAlive(pid int) bool {
 	return errors.Is(err, syscall.EPERM)
 }
 
+func waitProcessGone(pid int, timeout time.Duration) {
+	if pid <= 0 {
+		return
+	}
+	deadline := time.Now().Add(timeout)
+	for processAlive(pid) && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 func ValidateConfig(bin, cfg string) error {
 	cmd := exec.Command(bin, "check", "-c", cfg)
 	out, err := cmd.CombinedOutput()
@@ -153,8 +164,13 @@ func (m *Manager) Apply(f state.File, needRestart bool) error {
 			}
 		}
 	}
+	oldPID := m.readPID()
+	oldPrivileged := m.privileged
 	if err := m.stopLocked(); err != nil {
 		return err
+	}
+	if oldPrivileged && oldPID > 0 {
+		waitProcessGone(oldPID, 2*time.Second)
 	}
 	m.version = versionOfBinary(bin)
 	cfg := m.st.ConfigPath()
@@ -407,7 +423,7 @@ func FindBinary(configured string) (string, error) {
 			}
 		}
 	}
-	return "", fmt.Errorf("请先下载或导入内核")
+	return "", fmt.Errorf("未找到 sing-box 内核")
 }
 
 func Version(path string) string {
@@ -434,4 +450,54 @@ func findSingBoxPID(bin string) int {
 	}
 	n, _ := strconv.Atoi(strings.TrimSpace(string(out)))
 	return n
+}
+
+func isArm64Binary(path string) bool {
+	if f, err := macho.Open(path); err == nil {
+		defer f.Close()
+		return f.Cpu == macho.CpuArm64
+	}
+	if ff, err := macho.OpenFat(path); err == nil {
+		defer ff.Close()
+		for _, arch := range ff.Arches {
+			if arch.Cpu == macho.CpuArm64 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func latestManaged(coresDir string) string {
+	ents, err := os.ReadDir(coresDir)
+	if err != nil {
+		return ""
+	}
+	var best string
+	var bestMod time.Time
+	for _, e := range ents {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasPrefix(name, "sing-box") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		p := filepath.Join(coresDir, name)
+		if info.Mode()&0o111 == 0 {
+			continue
+		}
+		if !isArm64Binary(p) {
+			continue
+		}
+		if info.ModTime().After(bestMod) {
+			bestMod = info.ModTime()
+			best = p
+		}
+	}
+	return best
 }

@@ -110,8 +110,12 @@ public class AsterState: ObservableObject {
         return address
     }
 
-    // 后台特性与采样开关
-    @Published public var passiveSampling: Bool = true
+    // 后台特性开关
+    @Published public var allowLan: Bool = false
+    @Published public var strictRoute: Bool = false
+    @Published public var autostart: Bool = false
+    @Published public var delayTimeoutMs: Int = 2500
+    @Published public var delayConcurrency: Int = 8
 
     // 原生三级网络延时诊断与实时 Top 进程速率
     @Published public var diagnostics: NetworkDiagnostics = .placeholder
@@ -124,11 +128,11 @@ public class AsterState: ObservableObject {
     // 高性能本地进程图标缓存 (避免每帧重复调用 NSWorkspace 耗尽主线程 CPU)
     private var iconCache: [String: NSImage] = [:]
 
-    private var statusWsTask: URLSessionWebSocketTask?
-    private var trafficWsTask: URLSessionWebSocketTask?
-    private var connWsTask: URLSessionWebSocketTask?
-    private var logsWsTask: URLSessionWebSocketTask?
-    private var processesWsTask: URLSessionWebSocketTask?
+    private var statusWsTask: UnixWebSocket?
+    private var trafficWsTask: UnixWebSocket?
+    private var connWsTask: UnixWebSocket?
+    private var logsWsTask: UnixWebSocket?
+    private var processesWsTask: UnixWebSocket?
     private var reconnectTasks: [String: Task<Void, Never>] = [:]
     private var connectionSnapshot = ConnectionSnapshot()
     private var pendingConnectionMutations: [ConnectionMutation] = []
@@ -140,18 +144,7 @@ public class AsterState: ObservableObject {
     // first, so stale-event protection is scoped to the event type.
     private var latestRealtimeSequences: [String: UInt64] = [:]
 
-    /// Control-plane base (scheme://host:port). Overridable via ASTER_API_BASE.
-    private var apiBase: String {
-        if let env = ProcessInfo.processInfo.environment["ASTER_API_BASE"], !env.isEmpty {
-            return env.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        }
-        let port = UserDefaults.standard.object(forKey: "asterControlPort") as? Int ?? 1780
-        return "http://127.0.0.1:\(port)"
-    }
-
-    private var wsBase: String {
-        apiBase.replacingOccurrences(of: "http://", with: "ws://").replacingOccurrences(of: "https://", with: "wss://")
-    }
+    private var apiBase: String { "http://localhost" }
 
     @Published public var daemonError: String = ""
     @Published public var actionError: String?
@@ -192,9 +185,15 @@ public class AsterState: ObservableObject {
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let token = obj["apiToken"] as? String else { return }
         apiToken = token
-        if let port = obj["controlPort"] as? Int, port > 0 {
-            UserDefaults.standard.set(port, forKey: "asterControlPort")
-        }
+    }
+
+    private func controlPlaneNotReadyError() -> NSError {
+        NSError(domain: "Aster", code: -2, userInfo: [NSLocalizedDescriptionKey: "控制面尚未就绪"])
+    }
+
+    private func isPublicStatus(_ request: URLRequest) -> Bool {
+        let method = request.httpMethod ?? "GET"
+        return method == "GET" && request.url?.path.hasSuffix("/api/v1/status") == true
     }
 
     private func apiURL(_ path: String, query: [URLQueryItem] = []) -> URL? {
@@ -218,10 +217,27 @@ public class AsterState: ObservableObject {
 
     private func apiData(for request: URLRequest) async throws -> (Data, URLResponse) {
         var req = request
-        if !apiToken.isEmpty && req.value(forHTTPHeaderField: "Authorization") == nil {
-            req.setValue("Bearer \(apiToken)", forHTTPHeaderField: "Authorization")
+        if !isPublicStatus(req) {
+            if apiToken.isEmpty {
+                loadAPIToken()
+            }
+            if apiToken.isEmpty {
+                throw controlPlaneNotReadyError()
+            }
+            if req.value(forHTTPHeaderField: "Authorization") == nil {
+                req.setValue("Bearer \(apiToken)", forHTTPHeaderField: "Authorization")
+            }
         }
-        return try await URLSession.shared.data(for: req)
+        let first = try await UnixDaemonTransport.request(req)
+        if let http = first.1 as? HTTPURLResponse, http.statusCode == 401, !isPublicStatus(req) {
+            loadAPIToken()
+            if apiToken.isEmpty {
+                throw controlPlaneNotReadyError()
+            }
+            req.setValue("Bearer \(apiToken)", forHTTPHeaderField: "Authorization")
+            return try await UnixDaemonTransport.request(req)
+        }
+        return first
     }
 
     private func apiGet(_ path: String, query: [URLQueryItem] = []) async throws -> (Data, URLResponse) {
@@ -246,8 +262,12 @@ public class AsterState: ObservableObject {
 
     public func start() {
         realtimeStreamingEnabled = true
-        loadAPIToken()
-        ensureDaemonRunning()
+        Task { await self.connectControlPlane() }
+    }
+
+    private func connectControlPlane() async {
+        await waitForControlPlane()
+        guard !apiToken.isEmpty else { return }
         refreshAll()
         fetchIPInfo(force: false)
         startStatusWebSocket()
@@ -255,8 +275,31 @@ public class AsterState: ObservableObject {
         startConnectionsWebSocket()
         startLogsWebSocket()
         startProcessesWebSocket()
-        Task { await self.fetchICloudStatus() }
+        await fetchICloudStatus()
+    }
 
+    private func waitForControlPlane() async {
+        if !(await pingDaemon()) {
+            launchDaemonProcess()
+        }
+        for _ in 0..<40 {
+            if await pingDaemon() { break }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        if !(await pingDaemon()) {
+            daemonError = "无法连接控制面"
+            return
+        }
+        isConnected = true
+        for _ in 0..<40 {
+            loadAPIToken()
+            if !apiToken.isEmpty {
+                daemonError = ""
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(250))
+        }
+        daemonError = "控制面尚未就绪"
     }
 
     // MARK: - 本地 App 图标缓存获取 (4级穿透解析 + SF Symbol 高质感降级引擎)
@@ -363,19 +406,10 @@ public class AsterState: ObservableObject {
     }
 
     // MARK: - 后台 Go 引擎健康监控
-    public func ensureDaemonRunning() {
-        Task {
-            let running = await pingDaemon()
-            if !running {
-                launchDaemonProcess()
-            }
-        }
-    }
-
     private func pingDaemon() async -> Bool {
         guard let url = apiURL("/api/v1/status") else { return false }
         do {
-            let (_, response) = try await URLSession.shared.data(from: url)
+            let (_, response) = try await UnixDaemonTransport.request(URLRequest(url: url))
             if let http = response as? HTTPURLResponse, http.statusCode == 200 {
                 self.isConnected = true
                 return true
@@ -414,10 +448,8 @@ public class AsterState: ObservableObject {
             Task {
                 for _ in 0..<8 {
                     try? await Task.sleep(for: .milliseconds(250))
-                    self.loadAPIToken()
                     if await self.pingDaemon() { break }
                 }
-                self.refreshAll()
             }
         } catch {
             self.daemonError = "启动守护进程失败: \(error.localizedDescription)"
@@ -665,8 +697,22 @@ public class AsterState: ObservableObject {
 
     public func setCapture(systemProxy: Bool, tun: Bool) {
         triggerHaptic()
-        patchAction("/api/v1/capture", body: ["systemProxy": systemProxy, "tun": tun])
-        triggerAutoFetchIP()
+        let previous = status.capture
+        status.capture = CaptureSettings(systemProxy: systemProxy, tun: tun)
+        AppDelegate.shared?.syncCaptureMenuItems()
+        guard let url = apiURL("/api/v1/capture") else {
+            status.capture = previous
+            AppDelegate.shared?.syncCaptureMenuItems()
+            return
+        }
+        var request = authorizedRequest(url: url, method: "PATCH")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: ["systemProxy": systemProxy, "tun": tun])
+        Task { @MainActor in
+            await self.performStatusAction(request)
+            AppDelegate.shared?.syncCaptureMenuItems()
+            self.triggerAutoFetchIP()
+        }
     }
 
     public func selectNode(_ tag: String) {
@@ -731,7 +777,7 @@ public class AsterState: ObservableObject {
             request.timeoutInterval = 10.0
             request.httpBody = try? JSONSerialization.data(withJSONObject: ["tag": tag])
             do {
-                let (data, response) = try await URLSession.shared.data(for: request)
+                let (data, response) = try await apiData(for: request)
                 guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
                     let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
                     throw NSError(domain: "Aster", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message ?? "节点延迟测试失败"])
@@ -780,7 +826,7 @@ public class AsterState: ObservableObject {
             request.timeoutInterval = 45.0 // 并发测完全量节点可能需要较长时间
             request.httpBody = try? JSONSerialization.data(withJSONObject: ["tags": tags])
             do {
-                let (data, response) = try await URLSession.shared.data(for: request)
+                let (data, response) = try await apiData(for: request)
                 if let http = response as? HTTPURLResponse, http.statusCode == 200,
                    let list = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
                     var delayMap: [String: Int] = [:]
@@ -842,7 +888,7 @@ public class AsterState: ObservableObject {
             request.timeoutInterval = 15.0
             request.httpBody = try? JSONSerialization.data(withJSONObject: ["tag": tag])
             do {
-                let (data, response) = try await URLSession.shared.data(for: request)
+                let (data, response) = try await apiData(for: request)
                 guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
                     let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
                     throw NSError(domain: "Aster", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message ?? "节点带宽测速失败"])
@@ -930,23 +976,22 @@ public class AsterState: ObservableObject {
 
     public func patchSettings(body: [String: Any]) {
         triggerHaptic()
+        if let v = body["allowLan"] as? Bool { allowLan = v }
+        if let v = body["strictRoute"] as? Bool { strictRoute = v }
+        if let v = body["autostart"] as? Bool { autostart = v }
+        if let v = body["delayTimeoutMs"] as? Int { delayTimeoutMs = v }
+        if let v = body["delayConcurrency"] as? Int { delayConcurrency = v }
         guard let url = apiURL("/api/v1/settings") else { return }
         var request = authorizedRequest(url: url, method: "PATCH")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
         Task { @MainActor in
             await self.performStatusAction(request)
-            // Settings are reflected by AppStorage-backed controls. Always
-            // re-read the canonical server state so a rejected mutation cannot
+            // Re-read canonical daemon settings so a rejected mutation cannot
             // leave an optimistic toggle or probe URL displayed as enabled.
             await self.fetchSettings()
             await self.fetchStatus()
         }
-    }
-
-    public func togglePassiveSampling(_ enabled: Bool) {
-        self.passiveSampling = enabled
-        patchSettings(body: ["passiveSampling": enabled])
     }
 
     public func fetchSettings() async {
@@ -958,32 +1003,24 @@ public class AsterState: ObservableObject {
 				if let v = obj["delayURL"] as? String {
 					self.status.delayURL = v
 				}
-                if let ps = obj["passiveSampling"] as? Bool {
-                    self.passiveSampling = ps
-                }
                 if let v = obj["strictRoute"] as? Bool {
-                    UserDefaults.standard.set(v, forKey: "enableStrictRoute")
+                    self.strictRoute = v
                 }
                 if let v = obj["allowLan"] as? Bool {
-                    UserDefaults.standard.set(v, forKey: "allowLanSharing")
+                    self.allowLan = v
                 }
                 if let v = obj["autostart"] as? Bool {
-                    UserDefaults.standard.set(v, forKey: "autoLaunchOnLogin")
+                    self.autostart = v
                 }
                 if let v = obj["delayTimeoutMs"] as? Int {
-                    UserDefaults.standard.set(v, forKey: "speedtestTimeoutMs")
+                    self.delayTimeoutMs = v
                 } else if let v = obj["delayTimeoutMs"] as? Double {
-                    UserDefaults.standard.set(Int(v), forKey: "speedtestTimeoutMs")
+                    self.delayTimeoutMs = Int(v)
                 }
                 if let v = obj["delayConcurrency"] as? Int {
-                    UserDefaults.standard.set(v, forKey: "speedtestConcurrency")
+                    self.delayConcurrency = v
                 } else if let v = obj["delayConcurrency"] as? Double {
-                    UserDefaults.standard.set(Int(v), forKey: "speedtestConcurrency")
-                }
-                if let v = obj["controlPort"] as? Int, v > 0 {
-                    UserDefaults.standard.set(v, forKey: "asterControlPort")
-                } else if let v = obj["controlPort"] as? Double, v > 0 {
-                    UserDefaults.standard.set(Int(v), forKey: "asterControlPort")
+                    self.delayConcurrency = Int(v)
                 }
             }
         } catch {}
@@ -1017,7 +1054,7 @@ public class AsterState: ObservableObject {
     // MARK: - 复制终端代理命令 (⌘C)
     public func copyTerminalProxyCommand() {
         triggerHaptic()
-        let port = status.mixedPort ?? 2080
+        let port = status.mixedPort ?? 6780
         let cmd = "export http_proxy=http://127.0.0.1:\(port) https_proxy=http://127.0.0.1:\(port) all_proxy=socks5://127.0.0.1:\(port)"
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(cmd, forType: .string)
@@ -1255,7 +1292,7 @@ public class AsterState: ObservableObject {
         triggerHaptic()
         let appBundleURL = Bundle.main.bundleURL
 
-        // 1. 优先安全停止当前后台 daemon，确保释放 1780 / 2080 / 2090 端口
+        // 1. 优先安全停止当前后台 daemon
         let dataDirectory: URL
         if let override = ProcessInfo.processInfo.environment["ASTER_DATA_DIR"], !override.isEmpty {
             dataDirectory = URL(fileURLWithPath: override, isDirectory: true)
@@ -1305,7 +1342,7 @@ public class AsterState: ObservableObject {
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "name": name, "kind": kind, "url": url, "content": content, "urls": urls, "activate": activate
         ])
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await apiData(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String ?? "添加配置失败"
             throw NSError(domain: "Aster", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
@@ -1387,7 +1424,7 @@ public class AsterState: ObservableObject {
             var isSuccess = false
             var errorMsg: String? = nil
             do {
-                let (data, response) = try await URLSession.shared.data(for: request)
+                let (data, response) = try await apiData(for: request)
                 guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
                     let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
                     let err = message ?? "配置操作失败"
@@ -1419,7 +1456,7 @@ public class AsterState: ObservableObject {
         var request = authorizedRequest(url: endpoint, method: "PUT")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["script": script])
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await apiData(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String ?? "保存覆写失败"
             throw NSError(domain: "Aster", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
@@ -1448,7 +1485,7 @@ public class AsterState: ObservableObject {
             "kind": kind,
             "content": content
         ])
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await apiData(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String ?? "创建脚本失败"
             throw NSError(domain: "Aster", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
@@ -1468,7 +1505,7 @@ public class AsterState: ObservableObject {
             "name": name,
             "content": content
         ])
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await apiData(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String ?? "更新脚本失败"
             throw NSError(domain: "Aster", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
@@ -1483,7 +1520,7 @@ public class AsterState: ObservableObject {
             throw NSError(domain: "Aster", code: -1, userInfo: [NSLocalizedDescriptionKey: "无效的服务地址"])
         }
         let request = authorizedRequest(url: endpoint, method: "DELETE")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await apiData(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String ?? "删除脚本失败"
             throw NSError(domain: "Aster", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
@@ -1500,7 +1537,7 @@ public class AsterState: ObservableObject {
         var request = authorizedRequest(url: endpoint, method: "POST")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONSerialization.data(withJSONObject: ["scriptId": scriptId ?? ""])
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await apiData(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String ?? "挂载脚本失败"
             throw NSError(domain: "Aster", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
@@ -1825,7 +1862,7 @@ public class AsterState: ObservableObject {
     // value with no explanation.
     private func performStatusAction(_ request: URLRequest) async {
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
+            let (data, response) = try await apiData(for: request)
             guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
                 let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
                 throw NSError(
@@ -1868,31 +1905,16 @@ public class AsterState: ObservableObject {
         }
     }
 
-    private func wsURL(_ path: String) -> URL? {
-        var items: [URLQueryItem] = []
-        if !apiToken.isEmpty {
-            items.append(URLQueryItem(name: "token", value: apiToken))
-        }
-        guard let httpURL = apiURL(path, query: items) else { return nil }
-        var s = httpURL.absoluteString
-        if s.hasPrefix("https://") {
-            s = "wss://" + s.dropFirst("https://".count)
-        } else if s.hasPrefix("http://") {
-            s = "ws://" + s.dropFirst("http://".count)
-        }
-        return URL(string: s)
-    }
-
     public func stopRealtimeStreams() {
         realtimeStreamingEnabled = false
         reconnectTasks.values.forEach { $0.cancel() }
         reconnectTasks.removeAll()
         realtimeStreamGenerations.removeAll()
-        statusWsTask?.cancel(with: .goingAway, reason: nil)
-        trafficWsTask?.cancel(with: .goingAway, reason: nil)
-        connWsTask?.cancel(with: .goingAway, reason: nil)
-        logsWsTask?.cancel(with: .goingAway, reason: nil)
-        processesWsTask?.cancel(with: .goingAway, reason: nil)
+        statusWsTask?.cancel()
+        trafficWsTask?.cancel()
+        connWsTask?.cancel()
+        logsWsTask?.cancel()
+        processesWsTask?.cancel()
         statusWsTask = nil
         trafficWsTask = nil
         connWsTask = nil
@@ -1927,18 +1949,25 @@ public class AsterState: ObservableObject {
                 return
             }
             guard !Task.isCancelled, self?.realtimeStreamingEnabled == true else { return }
+            self?.loadAPIToken()
             await operation()
         }
     }
 
+    private func startUnixWebSocket(_ path: String) -> UnixWebSocket? {
+        loadAPIToken()
+        guard !apiToken.isEmpty else { return nil }
+        let socket = UnixWebSocket(path: path, token: apiToken)
+        socket.resume()
+        return socket
+    }
+
     // MARK: - WebSocket 实时流（状态、流量、连接、审计日志）
     private func startStatusWebSocket() {
-        guard let url = wsURL("/api/v1/ws/status") else { return }
         cancelPendingReconnect(for: "status")
         let generation = beginRealtimeStream("status")
         statusWsTask?.cancel()
-        statusWsTask = URLSession.shared.webSocketTask(with: url)
-        statusWsTask?.resume()
+        statusWsTask = startUnixWebSocket("/api/v1/ws/status")
         receiveStatusMessage(generation: generation)
     }
 
@@ -1994,12 +2023,10 @@ public class AsterState: ObservableObject {
     }
 
     private func startTrafficWebSocket() {
-        guard let url = wsURL("/api/v1/ws/traffic") else { return }
         cancelPendingReconnect(for: "traffic")
         let generation = beginRealtimeStream("traffic")
         trafficWsTask?.cancel()
-        trafficWsTask = URLSession.shared.webSocketTask(with: url)
-        trafficWsTask?.resume()
+        trafficWsTask = startUnixWebSocket("/api/v1/ws/traffic")
         receiveTrafficMessage(generation: generation)
     }
 
@@ -2079,12 +2106,10 @@ public class AsterState: ObservableObject {
     }
 
     private func startConnectionsWebSocket() {
-        guard let url = wsURL("/api/v1/ws/connections") else { return }
         cancelPendingReconnect(for: "connections")
         let generation = beginRealtimeStream("connections")
         connWsTask?.cancel()
-        connWsTask = URLSession.shared.webSocketTask(with: url)
-        connWsTask?.resume()
+        connWsTask = startUnixWebSocket("/api/v1/ws/connections")
         receiveConnectionsMessage(generation: generation)
     }
 
@@ -2121,22 +2146,18 @@ public class AsterState: ObservableObject {
     }
 
     private func startLogsWebSocket() {
-        guard let url = wsURL("/api/v1/ws/logs") else { return }
         cancelPendingReconnect(for: "logs")
         let generation = beginRealtimeStream("logs")
         logsWsTask?.cancel()
-        logsWsTask = URLSession.shared.webSocketTask(with: url)
-        logsWsTask?.resume()
+        logsWsTask = startUnixWebSocket("/api/v1/ws/logs")
         receiveLogsMessage(generation: generation)
     }
 
     private func startProcessesWebSocket() {
-        guard let url = wsURL("/api/v1/ws/processes") else { return }
         cancelPendingReconnect(for: "processes")
         let generation = beginRealtimeStream("processes")
         processesWsTask?.cancel()
-        processesWsTask = URLSession.shared.webSocketTask(with: url)
-        processesWsTask?.resume()
+        processesWsTask = startUnixWebSocket("/api/v1/ws/processes")
         receiveProcessesMessage(generation: generation)
     }
 

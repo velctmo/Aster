@@ -66,6 +66,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
     private var statusItemSubscription: AnyCancellable?
     private var statusMenuStateSubscription: AnyCancellable?
     private var strategyGroupsSubscription: AnyCancellable?
+    private var captureMenuSubscription: AnyCancellable?
+    private var statusBarSystemProxyItem: NSMenuItem?
+    private var statusBarTunItem: NSMenuItem?
+    private var appMenuSystemProxyItem: NSMenuItem?
+    private var appMenuTunItem: NSMenuItem?
     private var shouldReopenStatusMenuAfterSpeedtest = false
 
     static func main() {
@@ -108,6 +113,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         strategyGroupsSubscription = state.$strategyGroups
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.refreshStatusMenu() }
+        captureMenuSubscription = state.$status
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.syncCaptureMenuItems() }
 
         // 3. 构建标准系统主菜单
         setupAppMainMenu()
@@ -308,8 +316,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         controlMenu.addItem(NSMenuItem.separator())
         let sysProxyItem = controlMenu.addItem(withTitle: "系统代理", action: #selector(onToggleSystemProxy), keyEquivalent: "s")
         sysProxyItem.target = self
+        appMenuSystemProxyItem = sysProxyItem
         let tunItem = controlMenu.addItem(withTitle: "虚拟网卡", action: #selector(onToggleTun), keyEquivalent: "e")
         tunItem.target = self
+        appMenuTunItem = tunItem
         let copyCmdItem = controlMenu.addItem(withTitle: "复制终端代理", action: #selector(onCopyTerminalCommand), keyEquivalent: "c")
         copyCmdItem.keyEquivalentModifierMask = [.command, .shift]
         copyCmdItem.target = self
@@ -580,12 +590,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         menu.addItem(createMenuItem(title: "请求日志…", icon: "list.bullet.rectangle.portrait", action: #selector(onOpenInspector), key: "d"))
 
         let sysProxyItem = createMenuItem(title: "设置为系统代理", icon: "network", action: #selector(onToggleSystemProxy), key: "s")
-        sysProxyItem.state = state.status.capture.systemProxy ? .on : .off
+        statusBarSystemProxyItem = sysProxyItem
         menu.addItem(sysProxyItem)
 
         let tunItem = createMenuItem(title: "虚拟网卡", icon: "shield.lefthalf.filled", action: #selector(onToggleTun), key: "e")
-        tunItem.state = state.status.capture.tun ? .on : .off
+        statusBarTunItem = tunItem
         menu.addItem(tunItem)
+        syncCaptureMenuItems()
 
         let copyItem = createMenuItem(title: "复制终端代理命令", icon: "terminal", action: #selector(onCopyTerminalCommand), key: "c")
         menu.addItem(copyItem)
@@ -648,6 +659,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         statusItem?.length = 72
     }
 
+    public func syncCaptureMenuItems() {
+        applyCaptureState(to: statusBarSystemProxyItem, systemProxy: true)
+        applyCaptureState(to: statusBarTunItem, systemProxy: false)
+        applyCaptureState(to: appMenuSystemProxyItem, systemProxy: true)
+        applyCaptureState(to: appMenuTunItem, systemProxy: false)
+    }
+
+    private func applyCaptureState(to item: NSMenuItem?, systemProxy: Bool) {
+        guard let item else { return }
+        let status = AsterState.shared.status
+        if systemProxy {
+            item.state = status.capture.systemProxy ? .on : .off
+            let available = status.capabilities?.systemProxy.available ?? true
+            item.isEnabled = status.running && available
+            item.toolTip = available ? (status.running ? "将 mixed 端口写入 macOS 系统代理" : "核心未运行时不能开启系统代理") : (status.capabilities?.systemProxy.reason ?? "")
+        } else {
+            item.state = status.capture.tun ? .on : .off
+            let available = status.capabilities?.tun.available ?? true
+            item.isEnabled = available
+            item.toolTip = available ? "通过 PKG 网络组件启用虚拟网卡" : (status.capabilities?.tun.reason ?? "")
+        }
+    }
+
     public func refreshStatusMenu() {
         guard let menu = statusMenu else { return }
         // 如果菜单正在显示中，仅平滑更新内部菜单项的文字和状态，严禁 removeAllItems() 导致菜单意外关闭
@@ -679,9 +713,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
                     }
                 }
             } else if item.action == #selector(onToggleSystemProxy) {
-                item.state = state.status.capture.systemProxy ? .on : .off
+                applyCaptureState(to: item, systemProxy: true)
             } else if item.action == #selector(onToggleTun) {
-                item.state = state.status.capture.tun ? .on : .off
+                applyCaptureState(to: item, systemProxy: false)
             }
         }
     }

@@ -7,12 +7,7 @@ public struct SettingsView: View {
     @AppStorage("showNodeBandwidthBadge") private var showNodeBandwidthBadge: Bool = true
     @AppStorage("sortNodesByDelay") private var sortNodesByDelay: Bool = false
     @AppStorage("showConnectionQuickRule") private var showConnectionQuickRule: Bool = true
-    @AppStorage("enableStrictRoute") private var enableStrictRoute: Bool = false
-    @AppStorage("allowLanSharing") private var allowLanSharing: Bool = true
-    @AppStorage("autoLaunchOnLogin") private var autoLaunchOnLogin: Bool = true
     @AppStorage("minimizeOnLaunch") private var minimizeOnLaunch: Bool = false
-    @AppStorage("speedtestTimeoutMs") private var speedtestTimeoutMs: Int = 2500
-    @AppStorage("speedtestConcurrency") private var speedtestConcurrency: Int = 16
     // WebDAV 持久化配置
     @AppStorage("webdavServerURL") private var webdavServerURL: String = ""
     @AppStorage("webdavUsername") private var webdavUsername: String = ""
@@ -23,8 +18,7 @@ public struct SettingsView: View {
     @FocusState private var isEditingWebDAVPassword: Bool
 
     // 端口自定义状态
-    @State private var mixedPortInput: String = "2080"
-    @State private var clashPortInput: String = "2090"
+    @State private var mixedPortInput: String = "6780"
     @State private var isSavingPorts: Bool = false
 
     // 测速探针
@@ -83,22 +77,11 @@ public struct SettingsView: View {
     }
 
     private func syncFromBackendSettings() {
-        mixedPortInput = "\(state.status.mixedPort ?? 2080)"
-        clashPortInput = "\(state.status.clashPort ?? 2090)"
+        mixedPortInput = "\(state.status.mixedPort ?? 6780)"
         Task {
             await state.fetchSettings()
             await MainActor.run {
                 if let p = state.status.mixedPort, p > 0 { mixedPortInput = "\(p)" }
-                if let cp = state.status.clashPort, cp > 0 { clashPortInput = "\(cp)" }
-                enableStrictRoute = UserDefaults.standard.object(forKey: "enableStrictRoute") as? Bool ?? enableStrictRoute
-                allowLanSharing = UserDefaults.standard.object(forKey: "allowLanSharing") as? Bool ?? allowLanSharing
-                autoLaunchOnLogin = UserDefaults.standard.object(forKey: "autoLaunchOnLogin") as? Bool ?? autoLaunchOnLogin
-                if let ms = UserDefaults.standard.object(forKey: "speedtestTimeoutMs") as? Int {
-                    speedtestTimeoutMs = ms
-                }
-                if let n = UserDefaults.standard.object(forKey: "speedtestConcurrency") as? Int {
-                    speedtestConcurrency = n
-                }
             }
         }
     }
@@ -148,21 +131,6 @@ public struct SettingsView: View {
         .onDisappear {
             saveWebDAVCredentialIfPossible()
         }
-        .onChange(of: enableStrictRoute) { _, v in
-            state.patchSettings(body: ["strictRoute": v])
-        }
-        .onChange(of: allowLanSharing) { _, v in
-            state.patchSettings(body: ["allowLan": v])
-        }
-        .onChange(of: autoLaunchOnLogin) { _, v in
-            state.patchSettings(body: ["autostart": v])
-        }
-        .onChange(of: speedtestTimeoutMs) { _, v in
-            state.patchSettings(body: ["delayTimeoutMs": v])
-        }
-        .onChange(of: speedtestConcurrency) { _, v in
-            state.patchSettings(body: ["delayConcurrency": v])
-        }
         .confirmationDialog(
             "确认从 iCloud 恢复配置？",
             isPresented: $showConfirmICloudRestore,
@@ -211,7 +179,10 @@ public struct SettingsView: View {
                     settingSwitchRow(
                         title: "开机自动启动",
                         subtitle: "登录 macOS 后在后台自动启动并守护代理服务",
-                        isOn: $autoLaunchOnLogin
+                        isOn: Binding(
+                            get: { state.autostart },
+                            set: { state.patchSettings(body: ["autostart": $0]) }
+                        )
                     )
 
                     Divider()
@@ -259,30 +230,12 @@ public struct SettingsView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("混合代理监听端口 (Mixed Port)")
                                 .font(.system(size: 12.5, weight: .semibold))
-                            Text("合并支持 HTTP / HTTPS 与 SOCKS5 双协议接入 (默认: 2080)")
+                            Text("合并支持 HTTP / HTTPS 与 SOCKS5 双协议接入 (默认: 6780)")
                                 .font(.system(size: 11))
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
-                        TextField("2080", text: $mixedPortInput)
-                            .textFieldStyle(.roundedBorder)
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                            .frame(width: 80)
-                            .multilineTextAlignment(.trailing)
-                    }
-
-                    Divider()
-
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Clash RESTful API 端口")
-                                .font(.system(size: 12.5, weight: .semibold))
-                            Text("用于外部控制端、面板及节点切换接入 (默认: 2090)")
-                                .font(.system(size: 11))
-                                .foregroundColor(.secondary)
-                        }
-                        Spacer()
-                        TextField("2090", text: $clashPortInput)
+                        TextField("6780", text: $mixedPortInput)
                             .textFieldStyle(.roundedBorder)
                             .font(.system(size: 12, weight: .semibold, design: .monospaced))
                             .frame(width: 80)
@@ -324,7 +277,10 @@ public struct SettingsView: View {
                     settingSwitchRow(
                         title: "允许局域网设备连接",
                         subtitle: "在 0.0.0.0 监听混合代理端口，允许同局域网手机、电视设备接入",
-                        isOn: $allowLanSharing,
+                        isOn: Binding(
+                            get: { state.allowLan },
+                            set: { state.patchSettings(body: ["allowLan": $0]) }
+                        ),
                         isEnabled: !importedProfile,
                         disabledReason: "完整订阅由外部配置管理"
                     )
@@ -334,7 +290,10 @@ public struct SettingsView: View {
                     settingSwitchRow(
                         title: "严格路由模式 (Strict Route)",
                         subtitle: "强制非本地私有网段流量全量进入虚拟网卡，严防 IPv6 与直连旁路泄露真实 IP",
-                        isOn: $enableStrictRoute,
+                        isOn: Binding(
+                            get: { state.strictRoute },
+                            set: { state.patchSettings(body: ["strictRoute": $0]) }
+                        ),
                         isEnabled: !importedProfile,
                         disabledReason: "完整订阅由外部配置管理"
                     )
@@ -353,10 +312,10 @@ public struct SettingsView: View {
                         .foregroundColor(.blue)
                         .font(.system(size: 22))
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("按需管理员权限校验")
+                        Text("PKG 网络组件 + 常驻 Helper")
                             .font(.system(size: 12.5, weight: .semibold))
                             .foregroundColor(.primary)
-                        Text("开启或关闭 TUN 模式时按需调用 macOS 管理员授权。系统不常驻提权 Helper，不修改二进制 SUID 位，安全性最高。")
+                        Text("便携版只能使用系统代理。虚拟网卡需要一次安装 Aster.pkg，之后由 root launchd helper 以 20 秒租约托管核心，无需每次输入密码。未安装组件时开关会保持禁用。")
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                     }
@@ -367,23 +326,17 @@ public struct SettingsView: View {
     }
 
     private func saveCustomPorts() {
-        guard let mixed = Int(mixedPortInput.trimmingCharacters(in: .whitespaces)),
-              let clash = Int(clashPortInput.trimmingCharacters(in: .whitespaces)) else {
+        guard let mixed = Int(mixedPortInput.trimmingCharacters(in: .whitespaces)) else {
             state.notify(message: "端口必须为纯数字", type: .error)
             return
         }
-        guard (1024...65535).contains(mixed), (1024...65535).contains(clash) else {
+        guard (1024...65535).contains(mixed) else {
             state.notify(message: "端口范围必须在 1024 ~ 65535 之间", type: .error)
-            return
-        }
-        guard mixed != clash else {
-            state.notify(message: "混合代理端口与 Clash API 端口不能相同", type: .error)
             return
         }
         isSavingPorts = true
         state.patchSettings(body: [
-            "mixedPort": mixed,
-            "clashPort": clash
+            "mixedPort": mixed
         ])
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             self.isSavingPorts = false
@@ -459,7 +412,10 @@ public struct SettingsView: View {
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
-                        Picker("", selection: $speedtestTimeoutMs) {
+                        Picker("", selection: Binding(
+                            get: { state.delayTimeoutMs },
+                            set: { state.patchSettings(body: ["delayTimeoutMs": $0]) }
+                        )) {
                             Text("1500 ms (激进)").tag(1500)
                             Text("2500 ms (推荐)").tag(2500)
                             Text("5000 ms (宽容)").tag(5000)
@@ -479,9 +435,12 @@ public struct SettingsView: View {
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
-                        Picker("", selection: $speedtestConcurrency) {
-                            Text("8 并发").tag(8)
-                            Text("16 并发 (推荐)").tag(16)
+                        Picker("", selection: Binding(
+                            get: { state.delayConcurrency },
+                            set: { state.patchSettings(body: ["delayConcurrency": $0]) }
+                        )) {
+                            Text("8 并发 (推荐)").tag(8)
+                            Text("16 并发").tag(16)
                             Text("32 并发").tag(32)
                         }
                         .pickerStyle(.menu)

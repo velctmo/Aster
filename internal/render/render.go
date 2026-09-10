@@ -109,7 +109,7 @@ func Config(f state.File, dir string) ([]byte, error) {
 	}
 	port := f.Settings.MixedPort
 	if port == 0 {
-		port = 2080
+		port = state.DefaultMixedPort
 	}
 	inbounds := []any{
 		map[string]any{
@@ -125,10 +125,10 @@ func Config(f state.File, dir string) ([]byte, error) {
 			"type":         "tun",
 			"tag":          "tun-in",
 			"address":      []string{"172.19.0.1/30"},
-			"mtu":          4064,
+			"mtu":          1500,
 			"auto_route":   true,
 			"strict_route": f.Settings.StrictRoute,
-			"stack":        "gvisor",
+			"stack":        "mixed",
 		})
 	}
 
@@ -143,7 +143,7 @@ func Config(f state.File, dir string) ([]byte, error) {
 		"tag":                         "proxy",
 		"outbounds":                   proxyList,
 		"default":                     defaultSelect(f.Selected, proxyList),
-		"interrupt_exist_connections": true,
+		"interrupt_exist_connections": false,
 	})
 	urltestOut := tags
 	if len(urltestOut) == 0 {
@@ -160,7 +160,7 @@ func Config(f state.File, dir string) ([]byte, error) {
 		"url":                         testURL,
 		"interval":                    "3m",
 		"tolerance":                   50,
-		"interrupt_exist_connections": true,
+		"interrupt_exist_connections": false,
 	})
 	nodeServersMap := make(map[string]struct{})
 	for _, n := range nodes {
@@ -213,7 +213,7 @@ func Config(f state.File, dir string) ([]byte, error) {
 	}
 	clashPort := f.Settings.ClashPort
 	if clashPort <= 0 {
-		clashPort = 2090
+		clashPort = state.DefaultClashPort
 	}
 	cfg := map[string]any{
 		"log": map[string]any{"level": f.Settings.LogLevel, "timestamp": true},
@@ -284,7 +284,7 @@ func Config(f state.File, dir string) ([]byte, error) {
 			}
 			// Fail-Safe 后置兜底保护：
 			// 避免用户脚本重构 outbounds/experimental 时意外丢失 clash_api 或 inbounds，
-			// 导致 sing-box 未监听 2090 端口而健康检查超时被强杀。
+			// 导致 sing-box 未监听 Clash API 端口而健康检查超时被强杀。
 			var finalMap map[string]any
 			if err := json.Unmarshal(transformed, &finalMap); err == nil {
 				// 1. 确保 experimental.clash_api 存在且监听 127.0.0.1:clashPort
@@ -350,7 +350,7 @@ func Config(f state.File, dir string) ([]byte, error) {
 						"type":                        "selector",
 						"tag":                         "proxy",
 						"outbounds":                   []string{targetGroup},
-						"interrupt_exist_connections": true,
+						"interrupt_exist_connections": false,
 					}
 					finalMap["outbounds"] = append(outboundsList, proxySelector)
 				}
@@ -364,8 +364,12 @@ func Config(f state.File, dir string) ([]byte, error) {
 					hasGeoip := false
 					for _, item := range rsList {
 						if rm, ok := item.(map[string]any); ok {
-							if tag, _ := rm["tag"].(string); tag == "geosite-cn" { hasGeosite = true }
-							if tag, _ := rm["tag"].(string); tag == "geoip-cn" { hasGeoip = true }
+							if tag, _ := rm["tag"].(string); tag == "geosite-cn" {
+								hasGeosite = true
+							}
+							if tag, _ := rm["tag"].(string); tag == "geoip-cn" {
+								hasGeoip = true
+							}
 						}
 					}
 					geositePath := filepath.Join(dir, "rules", "geosite-cn.srs")
@@ -503,7 +507,9 @@ func restoreNodeSources(profile state.ConfigProfile, nodes []state.Node, locatio
 func fullConfig(f state.File, profile state.ConfigProfile) ([]byte, error) {
 	scriptSource := ProfileScript(f, &profile)
 	raw, err := script.TransformConfig(scriptSource, profile.Config, profile)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	var cfg map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &cfg); err != nil {
 		return nil, fmt.Errorf("完整配置不是有效 JSON: %w", err)
@@ -544,7 +550,7 @@ func ImportedInboundCapabilities(f state.File) InboundCapabilities {
 	if p == nil || p.Kind == state.ProfileKindNodes {
 		port := f.Settings.MixedPort
 		if port <= 0 {
-			port = 2080
+			port = state.DefaultMixedPort
 		}
 		return InboundCapabilities{SystemProxy: true, MixedListen: "127.0.0.1", MixedPort: port, Tun: true}
 	}

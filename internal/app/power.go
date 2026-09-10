@@ -7,47 +7,12 @@ import (
 	"strings"
 
 	"aster/internal/core"
+	"aster/internal/helper"
 	"aster/internal/macos"
 	"aster/internal/render"
 	"aster/internal/state"
 )
 
-func (a *App) SetPower(on bool) error {
-	a.mutationMu.Lock()
-	defer a.mutationMu.Unlock()
-	if on {
-		return a.startSessionLocked()
-	}
-	old := a.st.Get()
-	// Wanted is persisted intent, not proof that a process survived a previous
-	// daemon/UI restart.  A true value with no live core must still apply the
-	// configuration and start the process.
-	if old.Wanted == on && (!on || a.core.Running()) {
-		return nil
-	}
-	candidate := state.CloneFile(old)
-	candidate.Wanted = on
-	if !on {
-		_ = a.clash.CloseAll()
-	}
-	if err := a.apply(candidate, true); err != nil {
-		if restoreErr := a.apply(old, true); restoreErr != nil {
-			return fmt.Errorf("切换核心电源失败: %v；恢复旧核心失败: %w", err, restoreErr)
-		}
-		return fmt.Errorf("切换核心电源失败，已保留原状态: %w", err)
-	}
-	if _, err := a.st.Update(func(cur *state.File) error { cur.Wanted = on; return nil }); err != nil {
-		if restoreErr := a.apply(old, true); restoreErr != nil {
-			return fmt.Errorf("保存核心电源状态失败: %v；恢复旧核心失败: %w", err, restoreErr)
-		}
-		return fmt.Errorf("保存核心电源状态失败: %w", err)
-	}
-	return nil
-}
-
-// StartSession starts the current profile whenever the daemon owns a user
-// session. It intentionally does not treat the legacy Wanted flag as a user
-// facing on/off switch.
 func (a *App) StartSession() error {
 	a.mutationMu.Lock()
 	defer a.mutationMu.Unlock()
@@ -61,17 +26,16 @@ func (a *App) startSessionLocked() error {
 	}
 	if _, err := core.BinaryFor(old); err != nil {
 		a.setErr(err, 0)
-		return fmt.Errorf("请先下载或导入内核: %w", err)
+		return fmt.Errorf("未找到 sing-box 内核: %w", err)
 	}
 	candidate := state.CloneFile(old)
 	candidate.Wanted = true
 	if err := a.apply(candidate, true); err != nil {
-		// apply(candidate) has already recorded the actionable error. Do not
-		// call apply(old): doing so resets lastErr and turns an auto-start
-		// failure into an unexplained stopped state.
-		_ = a.core.Stop()
-		_ = a.writeConfig(old)
-		_ = macos.SetProxy(false, proxyHost(old), proxyPort(old), nil)
+		if !a.core.Running() {
+			_ = a.core.Stop()
+			_ = a.writeConfig(old)
+		}
+		_ = a.disableSystemProxy(old)
 		return fmt.Errorf("自动启动核心失败: %w", err)
 	}
 	if _, err := a.st.Update(func(cur *state.File) error { cur.Wanted = true; return nil }); err != nil {
@@ -101,10 +65,49 @@ func (a *App) SetCapture(c state.Capture) error {
 	if c.Tun && !render.SupportsTun(current) {
 		return fmt.Errorf("当前完整配置没有 tun 入站，无法启用 TUN")
 	}
+	if c.Tun && !helper.NewClient().Installed() {
+		return fmt.Errorf("请安装 Aster 网络组件（Aster.pkg）")
+	}
+	proxyChanged := c.SystemProxy != current.Capture.SystemProxy
+	tunChanged := c.Tun != current.Capture.Tun
+	if proxyChanged && !tunChanged {
+		return a.setFullProfileSystemProxy(current, c)
+	}
 	candidate := state.CloneFile(current)
 	candidate.Capture = c
-	_ = a.clash.CloseAll()
-	return a.applyAndCommitCandidate(current, candidate, func(cur *state.File) { cur.Capture = c })
+	return a.applyAndCommitCandidateWithRestart(current, candidate, tunChanged, func(cur *state.File) { cur.Capture = c })
+}
+
+func (a *App) clearStartupLeftover() {
+	f := a.st.Get()
+	host, port := proxyHost(f), proxyPort(f)
+	if owner, ok := macos.ReadOwnership(a.st.Dir()); ok {
+		if owner.Host != host || owner.Port != port {
+			_ = macos.ClearLeftover(owner.Host, owner.Port)
+			macos.ClearOwnership(a.st.Dir())
+		}
+	}
+	if !f.Capture.SystemProxy {
+		_ = macos.ClearLeftover(host, port)
+		macos.ClearOwnership(a.st.Dir())
+	}
+}
+
+func (a *App) enableSystemProxy(f state.File) error {
+	host, port := proxyHost(f), proxyPort(f)
+	if err := macos.SetProxy(true, host, port, f.Settings.ProxyBypass); err != nil {
+		return err
+	}
+	_ = macos.WriteOwnership(a.st.Dir(), host, port, os.Getpid())
+	return nil
+}
+
+func (a *App) disableSystemProxy(f state.File) error {
+	host, port := proxyHost(f), proxyPort(f)
+	err := macos.SetProxy(false, host, port, nil)
+	_ = macos.ClearLeftover(host, port)
+	macos.ClearOwnership(a.st.Dir())
+	return err
 }
 
 // setFullProfileSystemProxy changes only the macOS proxy setting. The imported
@@ -112,45 +115,30 @@ func (a *App) SetCapture(c state.Capture) error {
 // Persist only after the system change succeeds, and put the old system setting
 // back if persistence fails.
 func (a *App) setFullProfileSystemProxy(old state.File, capture state.Capture) error {
-	if old.Wanted && !a.core.Running() {
+	if capture.SystemProxy && !a.core.Running() {
 		if detail := a.core.LastError(); detail != "" {
-			return fmt.Errorf("完整配置核心未运行: %s", detail)
+			return fmt.Errorf("核心未运行，无法启用系统代理: %s", detail)
 		}
-		return fmt.Errorf("完整配置核心未运行")
+		return fmt.Errorf("核心未运行，无法启用系统代理")
 	}
-	applyProxy := func(f state.File, enabled bool) error {
-		if f.Wanted && enabled {
-			return macos.SetProxy(true, proxyHost(f), proxyPort(f), f.Settings.ProxyBypass)
+	applyProxy := func(enabled bool) error {
+		if enabled {
+			return a.enableSystemProxy(old)
 		}
-		return macos.SetProxy(false, proxyHost(f), proxyPort(f), nil)
+		return a.disableSystemProxy(old)
 	}
-	if err := applyProxy(old, capture.SystemProxy); err != nil {
+	if err := applyProxy(capture.SystemProxy); err != nil {
 		return err
 	}
 	if _, err := a.st.Update(func(cur *state.File) error {
 		cur.Capture.SystemProxy = capture.SystemProxy
 		return nil
 	}); err != nil {
-		_ = applyProxy(old, old.Capture.SystemProxy)
+		_ = applyProxy(old.Capture.SystemProxy)
 		return fmt.Errorf("保存系统代理状态失败，已恢复原设置: %w", err)
 	}
+	a.hub.Broadcast("status", a.Status())
 	return nil
-}
-
-func (a *App) ToggleSystemProxy() error {
-	f := a.st.Get()
-	return a.SetCapture(state.Capture{
-		SystemProxy: !f.Capture.SystemProxy,
-		Tun:         f.Capture.Tun,
-	})
-}
-
-func (a *App) ToggleTun() error {
-	f := a.st.Get()
-	return a.SetCapture(state.Capture{
-		SystemProxy: f.Capture.SystemProxy,
-		Tun:         !f.Capture.Tun,
-	})
 }
 
 func (a *App) SetMode(mode string) error {
@@ -172,7 +160,6 @@ func (a *App) SetMode(mode string) error {
 			_ = a.clash.PatchMode(clashMode(old.Mode))
 			return err
 		}
-		_ = a.clash.CloseAll()
 		a.hub.Broadcast("status", a.Status())
 		return nil
 	}
@@ -226,7 +213,6 @@ func (a *App) SelectNode(tag string) error {
 			_ = a.clash.Select("proxy", old.Selected)
 			return err
 		}
-		_ = a.clash.CloseAll()
 		a.hub.Broadcast("status", a.Status())
 		return nil
 	}

@@ -8,10 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"aster/internal/macos"
 	"aster/internal/state"
 )
 
-func TestControlAddrAndToken(t *testing.T) {
+func TestControlSocketAndToken(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("ASTER_DATA_DIR", dir)
 	a, err := New()
@@ -21,8 +22,8 @@ func TestControlAddrAndToken(t *testing.T) {
 	if a.APIToken() == "" {
 		t.Fatal("empty token")
 	}
-	if a.ControlAddr() != "127.0.0.1:1780" {
-		t.Fatalf("addr=%s", a.ControlAddr())
+	if a.ControlSocket() != filepath.Join(dir, "daemon.sock") {
+		t.Fatalf("socket=%s", a.ControlSocket())
 	}
 	if err := a.WriteDaemonPID(); err != nil {
 		t.Fatal(err)
@@ -71,6 +72,30 @@ func TestStartSessionPreservesFailureInsteadOfPersistingStoppedState(t *testing.
 	status := a.Status()
 	if status.SessionPhase != "failed" || status.Error == "" {
 		t.Fatalf("failure must remain visible: %+v", status)
+	}
+}
+
+func TestStatusSystemProxyFollowsOSNotDiskPreference(t *testing.T) {
+	t.Setenv("ASTER_DATA_DIR", t.TempDir())
+	a, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Store().Update(func(f *state.File) error {
+		f.Capture.SystemProxy = true
+		f.Wanted = false
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f := a.Store().Get()
+	status := a.Status()
+	osOn := macos.SystemProxyPointsTo(proxyHost(f), proxyPort(f))
+	if status.Capture.SystemProxy != osOn {
+		t.Fatalf("status capture=%v os=%v", status.Capture.SystemProxy, osOn)
+	}
+	if osOn {
+		t.Skip("this machine already has Aster mixed as system proxy")
 	}
 }
 

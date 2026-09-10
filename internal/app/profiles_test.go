@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"aster/internal/helper"
 	"aster/internal/state"
 )
 
@@ -59,6 +60,18 @@ func TestCreateSubscriptionProfileRejectsNonArrayOutbounds(t *testing.T) {
 	}
 	if got := len(a.Store().Get().Profiles); got != 1 {
 		t.Fatalf("invalid subscription created profile count=%d", got)
+	}
+}
+
+func TestNodeTunCapabilityRequiresHelper(t *testing.T) {
+	f := state.DefaultFile()
+	caps := capabilitiesFor(f)
+	installed := helper.NewClient().Installed()
+	if caps.Tun.Available != installed {
+		t.Fatalf("tun available=%v helper installed=%v reason=%q", caps.Tun.Available, installed, caps.Tun.Reason)
+	}
+	if !installed && caps.Tun.Reason == "" {
+		t.Fatal("missing helper must explain why TUN is unavailable")
 	}
 }
 
@@ -461,7 +474,7 @@ func TestImportedProfileInboundSummaryPreservesLoopbackAddress(t *testing.T) {
 	}
 }
 
-func TestSetCaptureFailureRestoresPersistedCapture(t *testing.T) {
+func TestSetCaptureSystemProxyPersistsWithoutRestartingCore(t *testing.T) {
 	t.Setenv("ASTER_DATA_DIR", t.TempDir())
 	a, err := New()
 	if err != nil {
@@ -474,20 +487,20 @@ func TestSetCaptureFailureRestoresPersistedCapture(t *testing.T) {
 	if _, err := a.Store().Update(func(f *state.File) error {
 		f.Settings.CorePath = fakeCore
 		f.Wanted = true
-		f.Capture = state.Capture{SystemProxy: true}
+		f.Capture = state.Capture{SystemProxy: true, Tun: false}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.SetCapture(state.Capture{SystemProxy: false}); err == nil {
-		t.Fatal("expected core launch failure")
+	if err := a.SetCapture(state.Capture{SystemProxy: false, Tun: false}); err != nil {
+		t.Fatalf("turning system proxy off should not restart the core: %v", err)
 	}
-	if got := a.Store().Get().Capture; got != (state.Capture{SystemProxy: true}) {
-		t.Fatalf("capture was not restored: %+v", got)
+	if got := a.Store().Get().Capture; got != (state.Capture{SystemProxy: false}) {
+		t.Fatalf("capture was not persisted: %+v", got)
 	}
 }
 
-func TestFullProfileCaptureFailureKeepsPersistedCapture(t *testing.T) {
+func TestFullProfileSystemProxyOffPersistsWhenCoreStopped(t *testing.T) {
 	t.Setenv("ASTER_DATA_DIR", t.TempDir())
 	a, err := New()
 	if err != nil {
@@ -510,16 +523,17 @@ func TestFullProfileCaptureFailureKeepsPersistedCapture(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.SetCapture(state.Capture{SystemProxy: false}); err == nil {
-		t.Fatal("expected full-profile core launch failure")
+	if err := a.SetCapture(state.Capture{SystemProxy: false}); err != nil {
+		t.Fatalf("full-profile system proxy off should persist without a live core: %v", err)
 	}
-	if got := a.Store().Get().Capture; got != (state.Capture{SystemProxy: true}) {
-		t.Fatalf("full-profile capture was not restored: %+v", got)
+	if got := a.Store().Get().Capture; got.SystemProxy {
+		t.Fatalf("full-profile capture was not persisted: %+v", got)
 	}
 }
 
 func TestTunValidationFailureDoesNotDisableExistingCapture(t *testing.T) {
 	t.Setenv("ASTER_DATA_DIR", t.TempDir())
+	t.Setenv("ASTER_HELPER_SOCKET", filepath.Join(t.TempDir(), "missing-helper.sock"))
 	a, err := New()
 	if err != nil {
 		t.Fatal(err)
@@ -536,36 +550,12 @@ func TestTunValidationFailureDoesNotDisableExistingCapture(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.SetCapture(state.Capture{SystemProxy: true, Tun: true}); err == nil {
-		t.Fatal("expected TUN candidate validation failure")
+	err = a.SetCapture(state.Capture{SystemProxy: true, Tun: true})
+	if err == nil {
+		t.Fatal("expected TUN enable to fail without helper")
 	}
 	if got := a.Store().Get().Capture; got != (state.Capture{SystemProxy: true}) {
 		t.Fatalf("TUN failure changed persisted capture: %+v", got)
-	}
-}
-
-func TestPowerOnFailureDoesNotPersistWanted(t *testing.T) {
-	t.Setenv("ASTER_DATA_DIR", t.TempDir())
-	a, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	fakeCore := filepath.Join(t.TempDir(), "sing-box")
-	if err := os.WriteFile(fakeCore, []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := a.Store().Update(func(f *state.File) error {
-		f.Settings.CorePath = fakeCore
-		f.Wanted = false
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := a.SetPower(true); err == nil {
-		t.Fatal("expected failed power-on")
-	}
-	if a.Store().Get().Wanted {
-		t.Fatal("failed power-on persisted Wanted=true")
 	}
 }
 
@@ -635,20 +625,10 @@ func TestValidateSettingsRejectsUnsafeValues(t *testing.T) {
 	}
 }
 
-func TestPutSettingsRejectsLiveControlPortChange(t *testing.T) {
-	t.Setenv("ASTER_DATA_DIR", t.TempDir())
-	a, err := New()
-	if err != nil {
+func TestValidateSettingsAcceptsDefaultPorts(t *testing.T) {
+	s := state.DefaultFile().Settings
+	if err := validateSettings(s); err != nil {
 		t.Fatal(err)
-	}
-	before := a.Store().Get().Settings
-	updated := before
-	updated.ControlPort++
-	if err := a.PutSettings(updated); err == nil {
-		t.Fatal("expected live control port change to be rejected")
-	}
-	if got := a.Store().Get().Settings.ControlPort; got != before.ControlPort {
-		t.Fatalf("control port changed from %d to %d", before.ControlPort, got)
 	}
 }
 
@@ -687,10 +667,8 @@ func TestPortableBackupContainsOnlyConfigurationAndPreservesMachineState(t *test
 		f.Settings.CorePath = "/origin/sing-box"
 		f.Settings.MixedPort = 12080
 		f.Settings.ClashPort = 12090
-		f.Settings.ControlPort = 11780
 		f.Settings.AllowLan = true
 		f.Settings.Autostart = true
-		f.Settings.AutoConnect = true
 		f.Settings.DirectCN = false
 		f.Settings.DelayURL = "https://example.test/generate_204"
 		f.Capture = state.Capture{SystemProxy: false, Tun: true}
@@ -759,10 +737,8 @@ func TestPortableBackupContainsOnlyConfigurationAndPreservesMachineState(t *test
 		f.Settings.CorePath = "/target/sing-box"
 		f.Settings.MixedPort = 22080
 		f.Settings.ClashPort = 22090
-		f.Settings.ControlPort = 21780
 		f.Settings.AllowLan = false
 		f.Settings.Autostart = false
-		f.Settings.AutoConnect = false
 		f.Capture = state.Capture{SystemProxy: true, Tun: false}
 		f.Wanted = true
 		f.ClashSecret = "target-clash-secret"
@@ -781,10 +757,10 @@ func TestPortableBackupContainsOnlyConfigurationAndPreservesMachineState(t *test
 	if after.APIToken != "target-api-token" || after.ClashSecret != "target-clash-secret" {
 		t.Fatalf("restore replaced local credentials: token=%q secret=%q", after.APIToken, after.ClashSecret)
 	}
-	if after.Settings.CorePath != "/target/sing-box" || after.Settings.MixedPort != 22080 || after.Settings.ClashPort != 22090 || after.Settings.ControlPort != 21780 {
+	if after.Settings.CorePath != "/target/sing-box" || after.Settings.MixedPort != 22080 || after.Settings.ClashPort != 22090 {
 		t.Fatalf("restore replaced local runtime settings: %+v", after.Settings)
 	}
-	if after.Settings.AllowLan || after.Settings.Autostart || after.Settings.AutoConnect || after.Capture != (state.Capture{SystemProxy: true}) || !after.Wanted {
+	if after.Settings.AllowLan || after.Settings.Autostart || after.Capture != (state.Capture{SystemProxy: true}) || !after.Wanted {
 		t.Fatalf("restore replaced local activation state: %+v", after)
 	}
 	if after.Settings.DirectCN || after.Settings.DelayURL != "https://example.test/generate_204" || after.Profiles[0].Name != "可迁移节点池" || len(after.Rules) != 1 {

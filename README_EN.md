@@ -63,8 +63,8 @@ Aster is a native macOS proxy utility focused on minimal resource usage, fluid s
 ```mermaid
 graph TD
     UI["Aster.app (SwiftUI + AppKit)<br/>30~50MB RAM · Swift 6 Native"]
-    DAEMON["aster-daemon (:1780)<br/>Go Headless Daemon · Local Bearer Auth"]
-    CORE["sing-box (Standard Proxy Mode)<br/>Unprivileged (:2080 Mixed, :2090 Clash API)"]
+    DAEMON["aster-daemon (unix socket)<br/>Go Headless Daemon · Local Bearer Auth"]
+    CORE["sing-box (Standard Proxy Mode)<br/>Unprivileged (:6780 Mixed, 127.0.0.1:9090 Clash API)"]
     HELPER["aster-helper<br/>root launchd Helper (Unix Socket)"]
     TUN_CORE["sing-box (TUN Enhanced Mode)<br/>root-managed · utun device"]
 

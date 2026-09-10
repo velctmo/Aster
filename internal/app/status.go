@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"aster/internal/clash"
-	"aster/internal/logstore"
+	"aster/internal/helper"
 	"aster/internal/macos"
 	"aster/internal/render"
 	"aster/internal/state"
@@ -27,9 +27,6 @@ func (a *App) PutSettings(s state.Settings) error {
 	old := a.st.Get()
 	if p := old.ActiveProfile(); p != nil && p.Kind == state.ProfileKindSubscription && changesNodeRenderSettings(old.Settings, s) {
 		return fmt.Errorf("完整订阅配置为只读，节点模式渲染设置不可修改")
-	}
-	if old.Settings.ControlPort != s.ControlPort {
-		return fmt.Errorf("控制端口在守护进程运行期间不能修改")
 	}
 	restart := old.Settings.MixedPort != s.MixedPort || old.Settings.ClashPort != s.ClashPort || old.Settings.AllowLan != s.AllowLan ||
 		old.Settings.DNSMode != s.DNSMode || old.Settings.CorePath != s.CorePath || old.Settings.StrictRoute != s.StrictRoute
@@ -55,14 +52,13 @@ func validateSettings(s state.Settings) error {
 	}{
 		{"mixedPort", s.MixedPort},
 		{"clashPort", s.ClashPort},
-		{"controlPort", s.ControlPort},
 	} {
 		if port.value < 1 || port.value > 65535 {
 			return fmt.Errorf("%s 必须在 1 到 65535 之间", port.name)
 		}
 	}
-	if s.MixedPort == s.ClashPort || s.MixedPort == s.ControlPort || s.ClashPort == s.ControlPort {
-		return fmt.Errorf("mixed、Clash 和控制端口必须互不相同")
+	if s.MixedPort == s.ClashPort {
+		return fmt.Errorf("混合端口与 Clash API 端口必须互不相同")
 	}
 	u, err := url.ParseRequestURI(s.DelayURL)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
@@ -719,23 +715,12 @@ func (a *App) Status() StatusJSON {
 		label = "由完整配置管理"
 	}
 	port := proxyPort(f)
-	clashPort := f.Settings.ClashPort
-	if clashPort == 0 {
-		clashPort = 2090
-	}
 
 	coreErr := ""
 	if !running && f.Wanted {
 		coreErr = a.core.LastError()
 	}
 	coreVer := a.core.Version()
-	privileged := a.core.Privileged()
-
-	mixedBusy, clashBusy := false, false
-	if !running {
-		mixedBusy = checkBusyThrottled(net.JoinHostPort(proxyHost(f), strconv.Itoa(port)))
-		clashBusy = checkBusyThrottled("127.0.0.1:" + strconv.Itoa(clashPort))
-	}
 
 	a.mu.Lock()
 	pending := a.pending
@@ -774,10 +759,6 @@ func (a *App) Status() StatusJSON {
 	} else if needAdm && strings.Contains(errStr, "网络组件") {
 		phase = "networkComponentRequired"
 	}
-	ctrl := f.Settings.ControlPort
-	if ctrl <= 0 {
-		ctrl = 1780
-	}
 	status := StatusJSON{
 		Running:                running && f.Wanted,
 		Pending:                pending,
@@ -794,16 +775,8 @@ func (a *App) Status() StatusJSON {
 		Download:               down,
 		CoreVersion:            coreVer,
 		HasNodes:               has,
-		Wanted:                 f.Wanted,
 		RecentNodes:            f.RecentNodes,
-		MixedBusy:              mixedBusy,
-		ClashBusy:              clashBusy,
-		Privileged:             privileged,
 		MixedPort:              port,
-		HttpPort:               port,
-		SocksPort:              port,
-		ClashPort:              clashPort,
-		ControlPort:            ctrl,
 		DelayURL:               f.Settings.DelayURL,
 		APIVersion:             "1",
 		Capabilities:           caps,
@@ -827,6 +800,8 @@ func (a *App) Status() StatusJSON {
 // controllable TUN switch.
 func effectiveCapture(f state.File, running bool) state.Capture {
 	capture := f.Capture
+	host, port := proxyHost(f), proxyPort(f)
+	capture.SystemProxy = macos.SystemProxyPointsTo(host, port)
 	if p := f.ActiveProfile(); p != nil && p.Kind == state.ProfileKindSubscription {
 		capture.SystemProxy = capture.SystemProxy && render.SupportsSystemProxy(f)
 		capture.Tun = running && f.Wanted && render.SupportsTun(f)
@@ -837,8 +812,12 @@ func effectiveCapture(f state.File, running bool) state.Capture {
 func capabilitiesFor(f state.File) CapabilitiesJSON {
 	p := f.ActiveProfile()
 	if p == nil || p.Kind == state.ProfileKindNodes {
+		tun := CapabilityJSON{Available: helper.NewClient().Installed()}
+		if !tun.Available {
+			tun.Reason = "请安装 Aster 网络组件（Aster.pkg）"
+		}
 		return CapabilitiesJSON{
-			SystemProxy: CapabilityJSON{Available: true}, Tun: CapabilityJSON{Available: true},
+			SystemProxy: CapabilityJSON{Available: true}, Tun: tun,
 			NodeControl: CapabilityJSON{Available: true}, RuleControl: CapabilityJSON{Available: true},
 			Speedtest: CapabilityJSON{Available: true},
 		}
@@ -869,7 +848,7 @@ func proxyPort(f state.File) int {
 	if f.Settings.MixedPort > 0 {
 		return f.Settings.MixedPort
 	}
-	return 2080
+	return state.DefaultMixedPort
 }
 
 func proxyHost(f state.File) string {
@@ -959,10 +938,6 @@ func (a *App) Nodes() []NodeJSON {
 	return out
 }
 
-func (a *App) Logs(kind string, limit int, since int64) ([]logstore.Row, error) {
-	return a.logs.Query(kind, limit, since)
-}
-
 func validateBackupCandidate(candidate state.File) error {
 	if err := validateSettings(candidate.Settings); err != nil {
 		return fmt.Errorf("备份设置无效: %w", err)
@@ -1049,52 +1024,6 @@ func validateBackupNodes(profile state.ConfigProfile) error {
 }
 
 func (a *App) ClearProxyResidue() error {
-	port := a.st.Get().Settings.MixedPort
-	if port == 0 {
-		port = 2080
-	}
-	return macos.SetProxy(false, proxyHost(a.st.Get()), port, nil)
-}
-
-func (a *App) ProxyEnv() string {
 	f := a.st.Get()
-	p := proxyPort(f)
-	host := proxyHost(f)
-	endpoint := net.JoinHostPort(host, strconv.Itoa(p))
-	return fmt.Sprintf("export http_proxy=http://%s\nexport https_proxy=http://%s\nexport all_proxy=socks5://%s\n", endpoint, endpoint, endpoint)
-}
-
-func (a *App) LAN() map[string]any {
-	f := a.st.Get()
-	ip := macos.LANIP()
-	port := f.Settings.MixedPort
-	return map[string]any{
-		"allowLan": f.Settings.AllowLan,
-		"ip":       ip,
-		"port":     port,
-		"http":     fmt.Sprintf("http://%s:%d", ip, port),
-		"socks":    fmt.Sprintf("socks5://%s:%d", ip, port),
-	}
-}
-
-var (
-	portBusyMu    sync.Mutex
-	portBusyCache = map[string]portBusyEntry{}
-)
-
-type portBusyEntry struct {
-	busy      bool
-	checkedAt time.Time
-}
-
-func checkBusyThrottled(addr string) bool {
-	portBusyMu.Lock()
-	defer portBusyMu.Unlock()
-	now := time.Now()
-	if entry, ok := portBusyCache[addr]; ok && now.Sub(entry.checkedAt) < 3*time.Second {
-		return entry.busy
-	}
-	isBusy := busy(addr)
-	portBusyCache[addr] = portBusyEntry{busy: isBusy, checkedAt: now}
-	return isBusy
+	return a.disableSystemProxy(f)
 }

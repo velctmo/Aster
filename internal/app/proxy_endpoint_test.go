@@ -1,7 +1,6 @@
 package app
 
 import (
-	"strings"
 	"testing"
 
 	"aster/internal/state"
@@ -31,7 +30,7 @@ func TestImportedProxyEndpointPreservesIPv6Loopback(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if env := a.ProxyEnv(); !strings.Contains(env, "http://[::1]:7890") || !strings.Contains(env, "socks5://[::1]:7890") {
-		t.Fatalf("proxy environment lost IPv6 endpoint: %q", env)
+	if got := proxyHost(a.Store().Get()); got != "::1" {
+		t.Fatalf("stored proxy host=%q", got)
 	}
 }

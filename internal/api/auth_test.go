@@ -2,9 +2,12 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -100,22 +103,23 @@ func TestActivateFailureReturnsCurrentActiveProfile(t *testing.T) {
 	}
 }
 
-func TestMalformedPowerRequestDoesNotChangeState(t *testing.T) {
+func TestMalformedCaptureRequestDoesNotChangeState(t *testing.T) {
 	t.Setenv("ASTER_DATA_DIR", t.TempDir())
 	a, err := app.New()
 	if err != nil {
 		t.Fatal(err)
 	}
+	before := a.Store().Get().Capture
 	h := (&Server{App: a}).Handler()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/power", bytes.NewBufferString("{"))
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/capture", bytes.NewBufferString("{"))
 	req.Header.Set("Authorization", "Bearer "+a.APIToken())
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("code=%d", rr.Code)
 	}
-	if !a.Store().Get().Wanted {
-		t.Fatal("malformed request changed power state")
+	if a.Store().Get().Capture != before {
+		t.Fatal("malformed request changed capture")
 	}
 }
 
@@ -150,15 +154,15 @@ func TestTrailingJSONDoesNotChangeState(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := (&Server{App: a}).Handler()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/power", bytes.NewBufferString(`{"on":false}{"on":true}`))
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/capture", bytes.NewBufferString(`{"systemProxy":false,"tun":false}{"systemProxy":true,"tun":true}`))
 	req.Header.Set("Authorization", "Bearer "+a.APIToken())
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("code=%d body=%s", rr.Code, rr.Body.String())
 	}
-	if !a.Store().Get().Wanted {
-		t.Fatal("trailing JSON changed power state")
+	if a.Store().Get().Capture.SystemProxy || a.Store().Get().Capture.Tun {
+		t.Fatal("trailing JSON changed capture")
 	}
 }
 
@@ -170,11 +174,8 @@ func TestMissingRequiredBooleanDoesNotChangeState(t *testing.T) {
 	}
 	before := a.Store().Get()
 	h := (&Server{App: a}).Handler()
-	for _, endpoint := range []string{"/api/v1/power", "/api/v1/capture"} {
+	for _, endpoint := range []string{"/api/v1/capture"} {
 		req := httptest.NewRequest(http.MethodPatch, endpoint, bytes.NewBufferString(`{}`))
-		if endpoint == "/api/v1/power" {
-			req.Method = http.MethodPost
-		}
 		req.Header.Set("Authorization", "Bearer "+a.APIToken())
 		rr := httptest.NewRecorder()
 		h.ServeHTTP(rr, req)
@@ -182,28 +183,29 @@ func TestMissingRequiredBooleanDoesNotChangeState(t *testing.T) {
 			t.Fatalf("endpoint=%s code=%d body=%s", endpoint, rr.Code, rr.Body.String())
 		}
 		after := a.Store().Get()
-		if after.Wanted != before.Wanted || after.Capture != before.Capture {
+		if after.Capture != before.Capture {
 			t.Fatalf("endpoint=%s changed state: before=%+v after=%+v", endpoint, before.Capture, after.Capture)
 		}
 	}
 }
 
-func TestUnknownPowerFieldDoesNotChangeState(t *testing.T) {
+func TestUnknownCaptureFieldDoesNotChangeState(t *testing.T) {
 	t.Setenv("ASTER_DATA_DIR", t.TempDir())
 	a, err := app.New()
 	if err != nil {
 		t.Fatal(err)
 	}
+	before := a.Store().Get().Capture
 	h := (&Server{App: a}).Handler()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/power", bytes.NewBufferString(`{"on":false,"unexpected":true}`))
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/capture", bytes.NewBufferString(`{"systemProxy":true,"tun":false,"unexpected":true}`))
 	req.Header.Set("Authorization", "Bearer "+a.APIToken())
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, req)
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("code=%d body=%s", rr.Code, rr.Body.String())
 	}
-	if !a.Store().Get().Wanted {
-		t.Fatal("unknown JSON field changed power state")
+	if a.Store().Get().Capture != before {
+		t.Fatal("unknown JSON field changed capture")
 	}
 }
 
@@ -234,37 +236,7 @@ func TestInvalidSettingsPatchDoesNotChangeState(t *testing.T) {
 	}
 }
 
-func TestMissingCoreDownloadTagDoesNotChangeState(t *testing.T) {
-	t.Setenv("ASTER_DATA_DIR", t.TempDir())
-	a, err := app.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	before := a.Store().Get().Settings.CorePath
-	h := (&Server{App: a}).Handler()
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/core/download", bytes.NewBufferString(`{}`))
-	req.Header.Set("Authorization", "Bearer "+a.APIToken())
-	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("code=%d body=%s", rr.Code, rr.Body.String())
-	}
-	if got := a.Store().Get().Settings.CorePath; got != before {
-		t.Fatalf("missing tag changed core path: %q", got)
-	}
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/core/download", bytes.NewBufferString(`{"tag":"v1.14.0"}`))
-	req.Header.Set("Authorization", "Bearer "+a.APIToken())
-	rr = httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("missing checksum code=%d body=%s", rr.Code, rr.Body.String())
-	}
-	if got := a.Store().Get().Settings.CorePath; got != before {
-		t.Fatalf("missing checksum changed core path: %q", got)
-	}
-}
-
-func TestLegacySUIDEndpointsAreNotRegistered(t *testing.T) {
+func TestRemovedEndpointsAreNotRegistered(t *testing.T) {
 	t.Setenv("ASTER_DATA_DIR", t.TempDir())
 	a, err := app.New()
 	if err != nil {
@@ -274,6 +246,17 @@ func TestLegacySUIDEndpointsAreNotRegistered(t *testing.T) {
 		method string
 		path   string
 	}{
+		{http.MethodPost, "/api/v1/power"},
+		{http.MethodPut, "/api/v1/settings"},
+		{http.MethodGet, "/api/v1/logs"},
+		{http.MethodGet, "/api/v1/lan"},
+		{http.MethodGet, "/api/v1/proxy-env"},
+		{http.MethodGet, "/api/v1/core"},
+		{http.MethodGet, "/api/v1/core/releases"},
+		{http.MethodPost, "/api/v1/core/download"},
+		{http.MethodPost, "/api/v1/core/import"},
+		{http.MethodPost, "/api/v1/open-data-dir"},
+		{http.MethodPost, "/api/v1/window/open"},
 		{http.MethodPost, "/api/v1/core/grant"},
 		{http.MethodGet, "/api/v1/core/privilege"},
 	} {
@@ -281,8 +264,8 @@ func TestLegacySUIDEndpointsAreNotRegistered(t *testing.T) {
 		req.Header.Set("Authorization", "Bearer "+a.APIToken())
 		rr := httptest.NewRecorder()
 		(&Server{App: a}).Handler().ServeHTTP(rr, req)
-		if rr.Code != http.StatusNotFound {
-			t.Fatalf("legacy SUID endpoint %s %s must not be exposed: code=%d body=%s", tc.method, tc.path, rr.Code, rr.Body.String())
+		if rr.Code != http.StatusNotFound && rr.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("removed endpoint %s %s must not be exposed: code=%d body=%s", tc.method, tc.path, rr.Code, rr.Body.String())
 		}
 	}
 }
@@ -353,5 +336,46 @@ func TestConnectionsWebSocketSendsReplaceableInitialSnapshot(t *testing.T) {
 	}
 	if !snapshot.Snapshot || snapshot.Upserts == nil || snapshot.Closed == nil {
 		t.Fatalf("connection stream needs a complete snapshot: %+v", snapshot)
+	}
+}
+
+func TestUnixSocketServesPublicStatus(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ASTER_DATA_DIR", dir)
+	a, err := app.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sock := "u.sock"
+	_ = os.Remove(sock)
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = ln.Close()
+		_ = os.Remove(sock)
+	}()
+	_ = os.Chmod(sock, 0o600)
+	srv := &http.Server{Handler: (&Server{App: a}).Handler()}
+	go func() { _ = srv.Serve(ln) }()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(ctx, "unix", sock)
+			},
+		},
+		Timeout: time.Second,
+	}
+	resp, err := client.Get("http://localhost/api/v1/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status=%d", resp.StatusCode)
 	}
 }

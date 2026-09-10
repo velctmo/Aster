@@ -4,7 +4,6 @@ import AppKit
 
 public struct OverviewDashboardView: View {
     @ObservedObject var state = AsterState.shared
-    @AppStorage("allowLanSharing") private var allowLanSharing = false
     @State private var showPortsSheet = false
 
     public var body: some View {
@@ -21,6 +20,15 @@ public struct OverviewDashboardView: View {
                     .help(state.status.capabilities?.ruleControl.reason ?? "切换出站模式")
 
                 }
+            }
+
+            if let actionError = state.actionError, !actionError.isEmpty {
+                Text(actionError)
+                    .font(.system(size: 12))
+                    .foregroundColor(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, DesignTokens.pagePadding)
+                    .padding(.top, 8)
             }
 
             ScrollView {
@@ -58,7 +66,7 @@ public struct OverviewDashboardView: View {
                             title: "系统代理",
                             statusText: state.status.capture.systemProxy
                                 ? (state.status.running
-                                    ? "已配置为 127.0.0.1:\(state.status.mixedPort ?? 2080)"
+                                    ? "已配置为 127.0.0.1:\(state.status.mixedPort ?? 6780)"
                                     : "等待核心启动")
                                 : "未设置",
                             statusActive: state.status.capture.systemProxy && state.status.running,
@@ -67,7 +75,7 @@ public struct OverviewDashboardView: View {
                                 get: { state.status.capture.systemProxy },
                                 set: { state.setCapture(systemProxy: $0, tun: state.status.capture.tun) }
                             ),
-                            isEnabled: state.status.capabilities?.systemProxy.available ?? true
+                            isEnabled: state.status.running && (state.status.capabilities?.systemProxy.available ?? true)
                         )
 
                         // 卡片 2: 虚拟网卡 (彻底去除 TUN)
@@ -75,11 +83,19 @@ public struct OverviewDashboardView: View {
                             icon: "cpu.fill",
                             iconColor: .green,
                             title: "虚拟网卡",
-                            statusText: state.status.capture.tun
-                                ? (state.status.running ? "运行中 (系统级接管)" : (state.status.needAdmin ? "需要安装网络组件" : "等待核心启动"))
-                                : "已禁用",
+                            statusText: {
+                                if !(state.status.capabilities?.tun.available ?? true) {
+                                    return state.status.capabilities?.tun.reason ?? "请安装 Aster 网络组件（Aster.pkg）"
+                                }
+                                if state.status.capture.tun {
+                                    if state.status.running { return "运行中 (系统级接管)" }
+                                    if state.status.needAdmin { return "需要安装网络组件" }
+                                    return "等待核心启动"
+                                }
+                                return "已禁用"
+                            }(),
                             statusActive: state.status.capture.tun && state.status.running,
-                            description: "创建独立虚拟网卡，全量接管 TCP/UDP 流量，游戏与终端免配全代理，无需应用主动适配。",
+                            description: state.status.capabilities?.tun.reason ?? "创建独立虚拟网卡，全量接管 TCP/UDP 流量，游戏与终端免配全代理，无需应用主动适配。",
                             isOn: Binding(
                                 get: { state.status.capture.tun },
                                 set: { state.setCapture(systemProxy: state.status.capture.systemProxy, tun: $0) }
@@ -97,17 +113,14 @@ public struct OverviewDashboardView: View {
                             icon: "network",
                             iconColor: .indigo,
                             title: "局域网代理共享",
-                            statusText: importedProfile ? "由完整配置管理" : (allowLanSharing ? "已监听在 \(state.localLANIP):\(state.status.mixedPort ?? 2080)" : "局域网共享已关闭"),
-                            statusActive: !importedProfile && allowLanSharing,
+                            statusText: importedProfile ? "由完整配置管理" : (state.allowLan ? "已监听在 \(state.localLANIP):\(state.status.mixedPort ?? 6780)" : "局域网共享已关闭"),
+                            statusActive: !importedProfile && state.allowLan,
                             description: importedProfile
                                 ? "完整订阅的入站监听由配置作者管理，Aster 不会改写局域网共享设置。"
                                 : "允许局域网内的其它设备（如手机、平板、电视或同网络电脑）通过本机的 IP 与端口代理上网。",
                             isOn: Binding(
-                                get: { allowLanSharing },
-                                set: { v in
-                                    allowLanSharing = v
-                                    state.patchSettings(body: ["allowLan": v])
-                                }
+                                get: { state.allowLan },
+                                set: { state.patchSettings(body: ["allowLan": $0]) }
                             ),
                             isEnabled: !importedProfile,
                             actionMenu: {
@@ -119,7 +132,7 @@ public struct OverviewDashboardView: View {
                                 .buttonStyle(.plain)
 								.accessibilityLabel("局域网代理端口设置")
                                 .popover(isPresented: $showPortsSheet) {
-                                    PortsDetailPopoverView(port: state.status.mixedPort ?? 2080, clashPort: state.status.clashPort ?? 2090)
+                                    PortsDetailPopoverView(port: state.status.mixedPort ?? 6780)
                                 }
                             }
                         )
@@ -133,7 +146,6 @@ public struct OverviewDashboardView: View {
         }
         .onAppear {
             Task { await state.fetchSettings() }
-            allowLanSharing = UserDefaults.standard.object(forKey: "allowLanSharing") as? Bool ?? allowLanSharing
         }
     }
 
@@ -549,10 +561,8 @@ public struct DualIPCard: View {
 // MARK: - 3. 代理端口详情原生 Popover 弹层
 public struct PortsDetailPopoverView: View {
     let port: Int
-    let clashPort: Int
     @State private var copiedHttp = false
     @State private var copiedSocks = false
-    @State private var copiedControl = false
     @State private var copiedEnv = false
 
     private var envCommand: String {
@@ -583,13 +593,6 @@ public struct PortsDetailPopoverView: View {
                     copyText("127.0.0.1:\(port)")
                     copiedSocks = true
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copiedSocks = false }
-                }
-
-                // Clash API 端口
-                portRow(title: "内核控制端口", value: "127.0.0.1:\(clashPort)", isCopied: copiedControl) {
-                    copyText("127.0.0.1:\(clashPort)")
-                    copiedControl = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copiedControl = false }
                 }
             }
 

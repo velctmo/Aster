@@ -21,11 +21,6 @@ import (
 	"aster/internal/state"
 )
 
-const DefaultListenAddr = "127.0.0.1:1780"
-
-// ListenAddr is kept for compatibility; prefer App.ControlAddr().
-const ListenAddr = DefaultListenAddr
-
 type IPInfo struct {
 	IP        string `json:"ip"`
 	Country   string `json:"country"`
@@ -71,7 +66,6 @@ type App struct {
 	bandwidths          map[string]float64
 	effectiveNodesKey   string
 	effectiveNodes      []render.MergedNode
-	lastPassive         time.Time
 	failN               int
 	lastUp              int64
 	lastDown            int64
@@ -86,12 +80,10 @@ type App struct {
 	nextRestart         time.Time
 	refreshing          bool
 	polling             bool
-	sampling            bool
 	sweeping            bool
 	networkCheck        bool
 	startupGraceUntil   time.Time
 	lastNotifyTime      map[string]time.Time
-	listenAddr          string
 }
 
 type StatusJSON struct {
@@ -110,16 +102,8 @@ type StatusJSON struct {
 	Download               int64            `json:"download"`
 	CoreVersion            string           `json:"coreVersion"`
 	HasNodes               bool             `json:"hasNodes"`
-	Wanted                 bool             `json:"wanted"`
 	RecentNodes            []string         `json:"recentNodes"`
-	MixedBusy              bool             `json:"mixedBusy"`
-	ClashBusy              bool             `json:"clashBusy"`
-	Privileged             bool             `json:"privileged"`
 	MixedPort              int              `json:"mixedPort"`
-	HttpPort               int              `json:"httpPort"`
-	SocksPort              int              `json:"socksPort"`
-	ClashPort              int              `json:"clashPort"`
-	ControlPort            int              `json:"controlPort"`
 	DelayURL               string           `json:"delayURL"`
 	APIVersion             string           `json:"apiVersion"`
 	ActiveConfigID         string           `json:"activeConfigId"`
@@ -174,10 +158,6 @@ func New() (*App, error) {
 		return nil, err
 	}
 	f := st.Get()
-	ctrl := f.Settings.ControlPort
-	if ctrl <= 0 {
-		ctrl = 1780
-	}
 	a := &App{
 		st:                st,
 		core:              core.New(st),
@@ -189,7 +169,6 @@ func New() (*App, error) {
 		delays:            map[string]int{},
 		bandwidths:        map[string]float64{},
 		hub:               NewHub(),
-		listenAddr:        fmt.Sprintf("127.0.0.1:%d", ctrl),
 		lastErr:           f.Runtime.LastFailure,
 		startupGraceUntil: time.Now().Add(10 * time.Second),
 		lastNotifyTime:    make(map[string]time.Time),
@@ -197,11 +176,8 @@ func New() (*App, error) {
 	return a, nil
 }
 
-func (a *App) ControlAddr() string {
-	if a.listenAddr == "" {
-		return DefaultListenAddr
-	}
-	return a.listenAddr
+func (a *App) ControlSocket() string {
+	return a.st.ControlSocketPath()
 }
 
 func (a *App) APIToken() string {
@@ -243,6 +219,7 @@ func (a *App) StartBackground() {
 			return
 		case <-time.After(300 * time.Millisecond):
 		}
+		a.clearStartupLeftover()
 		_ = a.StartSession()
 	}()
 	a.bgWG.Add(1)
@@ -264,9 +241,9 @@ func (a *App) Shutdown() {
 	// The loop can have an in-flight core snapshot, refresh or SQLite sweep.
 	// Drain those tasks before closing shared resources below.
 	a.waitBackground()
-	_ = a.core.Stop()
 	f := a.st.Active()
-	_ = macos.SetProxy(false, proxyHost(f), proxyPort(f), nil)
+	_ = a.disableSystemProxy(f)
+	_ = a.core.Stop()
 	_ = a.logs.Close()
 	a.ClearDaemonPID()
 }
@@ -338,7 +315,7 @@ func (a *App) runBackground(ctx context.Context, running *bool, work func()) {
 
 func (a *App) reconcileSystemProxy(lastSvc *string) {
 	f := a.st.Active()
-	if !f.Wanted || !f.Capture.SystemProxy || !render.SupportsSystemProxy(f) {
+	if !f.Wanted || !f.Capture.SystemProxy || !render.SupportsSystemProxy(f) || !a.core.Running() {
 		return
 	}
 	svc, err := macos.ActiveService()
@@ -427,7 +404,7 @@ func (a *App) poll(ctx context.Context) {
 		restarts := a.coreRestarts
 		a.mu.Unlock()
 		if was != "内核已停止" {
-			_ = macos.SetProxy(false, proxyHost(f), proxyPort(f), nil)
+			_ = a.disableSystemProxy(f)
 			a.hub.Broadcast("status", a.Status())
 			a.notifyThrottled("Aster", "内核已停止", 5*time.Minute)
 		}
@@ -490,7 +467,7 @@ func (a *App) poll(ctx context.Context) {
 			a.mu.Unlock()
 			a.hub.Broadcast("status", a.Status())
 			if n == 8 {
-				_ = macos.SetProxy(false, proxyHost(f), proxyPort(f), nil)
+				_ = a.disableSystemProxy(f)
 				a.notifyThrottled("Aster", "内核无响应", 5*time.Minute)
 			}
 		}
@@ -540,18 +517,7 @@ func (a *App) poll(ctx context.Context) {
 	if observeConnections {
 		delta = diffConnections(previousConnections, a.connections, snap.UploadTotal, snap.DownloadTotal)
 	}
-	// 3.1 真实流量被动伴随采样 (用户产生日常轻量流量时静默平滑取样，受设置项控制)
-	// Bufferbloat 防护：若瞬时吞吐过高 (下行>6MB/s 或 上行>3MB/s)，TCP 队列膨胀会导致握手延迟严重失真，此时跳过被动采样
-	isModerateTraffic := (down > 10240 || up > 5120) && down < 6*1024*1024 && up < 3*1024*1024
-	shouldSample := f.Settings.PassiveSampling && isModerateTraffic && time.Since(a.lastPassive) >= 25*time.Second
-	if shouldSample {
-		a.lastPassive = time.Now()
-	}
 	a.mu.Unlock()
-
-	if shouldSample {
-		a.runBackground(ctx, &a.sampling, func() { a.passiveSamplePing(ctx) })
-	}
 
 	if observeProcesses {
 		procs := a.UpdateProcessStats(snap.Connections)
@@ -604,58 +570,6 @@ func diffConnections(previous, current map[string]clash.Connection, uploadTotal,
 	return delta
 }
 
-// passiveSamplePing 真实流量被动伴随采样与 EMA 加权滤波算法
-func (a *App) passiveSamplePing(ctx context.Context) {
-	f := a.st.Get()
-	if !a.core.Running() || !f.Wanted {
-		return
-	}
-	targetTag := f.Selected
-	if targetTag == "" || targetTag == "direct" {
-		return
-	}
-	realTag := targetTag
-	if targetTag != "auto" {
-		for _, n := range a.Nodes() {
-			if n.ID == targetTag {
-				realTag = n.Tag
-				break
-			}
-		}
-	}
-	targetURL := f.Settings.DelayURL
-	if targetURL == "" {
-		targetURL = "https://www.gstatic.com/generate_204"
-	}
-	// 1500ms 极短超时快速握手采样，杜绝开销
-	d, err := a.clash.DelayContext(ctx, realTag, targetURL, 1500)
-	if err != nil || d <= 0 {
-		return
-	}
-	a.mu.Lock()
-	oldD, exists := a.delays[realTag]
-	var smoothD int
-	if exists && oldD > 0 {
-		sample := d
-		// Outlier Clipping: 若突增超过基线的 2.5 倍且绝对差值超过 200ms，判定为瞬态网络抖动，进行限幅
-		if sample > int(float64(oldD)*2.5) && sample-oldD > 200 {
-			sample = oldD + int(float64(oldD)*0.5)
-		}
-		// EMA 加权滤波：70% 历史均值 + 30% 瞬间采样，平滑过渡消除毛刺
-		smoothD = int(0.70*float64(oldD) + 0.30*float64(sample))
-	} else {
-		smoothD = d
-	}
-	a.delays[realTag] = smoothD
-	if realTag == f.Selected || realTag == "auto" {
-		a.delay = smoothD
-	}
-	a.mu.Unlock()
-
-	a.hub.Broadcast("node_delay", map[string]any{"tag": realTag, "delay": smoothD})
-	a.hub.Broadcast("status", a.Status())
-}
-
 func (a *App) writeConfig(f state.File) error {
 	b, err := render.Config(f, a.st.Dir())
 	if err != nil {
@@ -700,6 +614,7 @@ func (a *App) apply(f state.File, restart bool) error {
 			a.needAdm = true
 			a.mu.Unlock()
 		}
+		_ = a.disableSystemProxy(f)
 		return err
 	} else {
 		a.mu.Lock()
@@ -712,52 +627,56 @@ func (a *App) apply(f state.File, restart bool) error {
 	if p := f.ActiveProfile(); p != nil && p.Kind == state.ProfileKindSubscription && f.Wanted {
 		if err := a.waitForStableCore(); err != nil {
 			_ = a.core.Stop()
+			_ = a.disableSystemProxy(f)
 			a.setErr(err, time.Since(startedAt))
 			return err
+		}
+	}
+	if f.Wanted {
+		if p := f.ActiveProfile(); p == nil || p.Kind != state.ProfileKindSubscription {
+			deadline := time.Now().Add(8 * time.Second)
+			healthy := false
+			for time.Now().Before(deadline) {
+				if a.clash.Healthy() {
+					_ = a.clash.PatchMode(clashMode(f.Mode))
+					if f.Selected != "" {
+						_ = a.clash.Select("proxy", f.Selected)
+					}
+					healthy = true
+					break
+				}
+				time.Sleep(200 * time.Millisecond)
+			}
+			if !healthy {
+				_ = a.core.Stop()
+				_ = a.disableSystemProxy(f)
+				err := fmt.Errorf("核心启动后未在 8 秒内通过控制接口健康检查")
+				a.setErr(err, time.Since(startedAt))
+				return err
+			}
 		}
 	}
 	proxyAllowed := true
 	if p := f.ActiveProfile(); p != nil && p.Kind == state.ProfileKindSubscription {
 		proxyAllowed = render.SupportsSystemProxy(f)
 	}
-	if f.Wanted && f.Capture.SystemProxy && proxyAllowed {
-		if err := macos.SetProxy(true, proxyHost(f), proxyPort(f), f.Settings.ProxyBypass); err != nil {
-			a.setErr(err, time.Since(startedAt))
-		}
-	} else {
-		_ = macos.SetProxy(false, proxyHost(f), proxyPort(f), nil)
-	}
-	if f.Wanted {
-		if p := f.ActiveProfile(); p != nil && p.Kind == state.ProfileKindSubscription {
-			return nil
-		}
-		deadline := time.Now().Add(8 * time.Second)
-		healthy := false
-		for time.Now().Before(deadline) {
-			if a.clash.Healthy() {
-				_ = a.clash.PatchMode(clashMode(f.Mode))
-				if f.Selected != "" {
-					_ = a.clash.Select("proxy", f.Selected)
-				}
-				healthy = true
-				break
-			}
-			time.Sleep(200 * time.Millisecond)
-		}
-		if !healthy {
-			_ = a.core.Stop()
-			err := fmt.Errorf("核心启动后未在 8 秒内通过控制接口健康检查")
+	if f.Wanted && f.Capture.SystemProxy && proxyAllowed && a.core.Running() {
+		if err := a.enableSystemProxy(f); err != nil {
 			a.setErr(err, time.Since(startedAt))
 			return err
 		}
+	} else if !f.Capture.SystemProxy {
+		_ = a.disableSystemProxy(f)
 	}
-	_, _ = a.st.Update(func(cur *state.File) error {
-		cur.Runtime.LastSuccessfulConfigID = f.ActiveConfigID
-		cur.Runtime.LastSuccessfulAt = time.Now().Unix()
-		cur.Runtime.LastFailure = ""
-		appendRunEvent(&cur.Runtime, state.RunEvent{At: time.Now().Unix(), ConfigID: f.ActiveConfigID, Outcome: "started", Category: "lifecycle", DurationMs: time.Since(startedAt).Milliseconds()})
-		return nil
-	})
+	if f.Wanted {
+		_, _ = a.st.Update(func(cur *state.File) error {
+			cur.Runtime.LastSuccessfulConfigID = f.ActiveConfigID
+			cur.Runtime.LastSuccessfulAt = time.Now().Unix()
+			cur.Runtime.LastFailure = ""
+			appendRunEvent(&cur.Runtime, state.RunEvent{At: time.Now().Unix(), ConfigID: f.ActiveConfigID, Outcome: "started", Category: "lifecycle", DurationMs: time.Since(startedAt).Milliseconds()})
+			return nil
+		})
+	}
 	return nil
 }
 
@@ -852,14 +771,8 @@ func (a *App) checkPorts(f state.File) error {
 	if a.core.Running() {
 		return nil
 	}
-	port := f.Settings.MixedPort
-	if port == 0 {
-		port = 2080
-	}
-	clashPort := f.Settings.ClashPort
-	if clashPort == 0 {
-		clashPort = 2090
-	}
+	port := state.EffectiveMixedPort(f.Settings.MixedPort)
+	clashPort := state.EffectiveClashPort(f.Settings.ClashPort)
 	if busyWithRetry("127.0.0.1:"+strconv.Itoa(port), 500*time.Millisecond) {
 		return fmt.Errorf("混合端口 %d 已被占用", port)
 	}
@@ -901,10 +814,6 @@ func mustExe() string {
 	return p
 }
 
-func TryListen() (net.Listener, error) {
-	return net.Listen("tcp", DefaultListenAddr)
-}
-
 func countryToFlag(code string) string {
 	if len(code) != 2 {
 		return "🌐"
@@ -930,10 +839,7 @@ func (a *App) GetIPInfo(force bool) DualIPInfo {
 	// IP probing only needs the active profile's network settings and avoids
 	// copying inactive subscriptions or full imported configurations.
 	f := a.st.Active()
-	port := f.Settings.MixedPort
-	if port == 0 {
-		port = 2080
-	}
+	port := proxyPort(f)
 
 	dual := DualIPInfo{
 		LocalIP: IPInfo{

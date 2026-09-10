@@ -23,12 +23,12 @@ make stop   # 结束 Aster / aster-daemon
 ```bash
 go build -o bin/aster-daemon ./cmd/aster-daemon
 export ASTER_DAEMON="$PWD/bin/aster-daemon"
-# 可选：ASTER_DATA_DIR=/tmp/aster-dev ASTER_API_BASE=http://127.0.0.1:1780
+# 可选：ASTER_DATA_DIR=/tmp/aster-dev
 ```
 
 ## 架构约定
 
-- UI（Swift）只通过 `127.0.0.1:<controlPort>` REST/WS 访问 daemon
+- UI（Swift）只通过本机 Unix socket（`daemon.sock`）REST/WS 访问 daemon
 - 写操作需 `Authorization: Bearer <apiToken>`（token 仅保存在 `~/Library/Application Support/Aster/machine.json`）
 - `GET /api/v1/status` 保持公开，用于健康检查与单实例探测
 - 状态目录：`~/Library/Application Support/Aster/`

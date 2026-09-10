@@ -1,8 +1,8 @@
 package macos
 
 import (
+	"errors"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -152,12 +152,18 @@ func SetProxy(on bool, host string, port int, bypass []string) error {
 	// Once installed, the root launchd helper owns system-level mutations.  This
 	// removes the osascript authorization fallback from the regular daemon.
 	if host == "127.0.0.1" && helper.NewClient().Installed() {
+		var err error
 		if on {
-			_, err := helper.NewClient().SetProxy(svc, port, sanitizeBypass(bypass))
+			_, err = helper.NewClient().SetProxy(svc, port, sanitizeBypass(bypass))
+		} else {
+			_, err = helper.NewClient().ClearProxy(svc, port)
+		}
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, helper.ErrUnavailable) {
 			return err
 		}
-		_, err := helper.NewClient().ClearProxy(svc, port)
-		return err
 	}
 	if on {
 		cleanBypass := sanitizeBypass(bypass)
@@ -236,35 +242,6 @@ func runNetworksetup(args []string) error {
 	return nil
 }
 
-func LANIP() string {
-	ifaces, err := net.Interfaces()
-	if err != nil {
-		return ""
-	}
-	for _, iface := range ifaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, _ := iface.Addrs()
-		for _, a := range addrs {
-			ipnet, ok := a.(*net.IPNet)
-			if !ok || ipnet.IP.To4() == nil {
-				continue
-			}
-			ip := ipnet.IP.To4()
-			if ip[0] == 127 {
-				continue
-			}
-			return ip.String()
-		}
-	}
-	return ""
-}
-
-func OpenURL(u string) {
-	_ = exec.Command("open", u).Start()
-}
-
 func ShowNotification(title, message string) {
 	script := fmt.Sprintf(`display notification %s with title %s`, appleString(message), appleString(title))
 	_ = exec.Command("osascript", "-e", script).Run()
@@ -272,61 +249,6 @@ func ShowNotification(title, message string) {
 
 func NotifyIfHidden(title, message string) {
 	ShowNotification(title, message)
-}
-
-func GetActiveBrowserDomain() (string, error) {
-	script := `
-tell application "System Events"
-    set frontApp to name of first application process whose frontmost is true
-end tell
-
-if frontApp is in {"Google Chrome", "Google Chrome Canary", "Chromium", "Brave Browser", "Microsoft Edge"} then
-    tell application frontApp to return URL of active tab of front window
-else if frontApp is "Safari" then
-    tell application "Safari" to return URL of front document
-else if frontApp is "Arc" then
-    tell application "Arc" to return URL of active tab of front window
-else
-    return ""
-end if
-`
-	cmd := exec.Command("osascript", "-e", script)
-	out, err := cmd.Output()
-	rawURL := strings.TrimSpace(string(out))
-
-	// Fallback to clipboard if no browser active URL
-	if rawURL == "" || err != nil {
-		clipCmd := exec.Command("pbpaste")
-		clipOut, _ := clipCmd.Output()
-		rawURL = strings.TrimSpace(string(clipOut))
-	}
-
-	if rawURL == "" {
-		return "", fmt.Errorf("未检测到有效网页或剪贴板内容")
-	}
-
-	return extractDomainFromURL(rawURL)
-}
-
-func extractDomainFromURL(raw string) (string, error) {
-	raw = strings.TrimSpace(raw)
-	if strings.Contains(raw, "://") {
-		parts := strings.Split(raw, "://")
-		if len(parts) > 1 {
-			raw = parts[1]
-		}
-	}
-	if idx := strings.Index(raw, "/"); idx != -1 {
-		raw = raw[:idx]
-	}
-	if idx := strings.Index(raw, ":"); idx != -1 {
-		raw = raw[:idx]
-	}
-	raw = strings.TrimSpace(strings.ToLower(raw))
-	if raw == "" || strings.Contains(raw, " ") || !strings.Contains(raw, ".") {
-		return "", fmt.Errorf("非有效域名: %s", raw)
-	}
-	return raw, nil
 }
 
 func SetAutostart(on bool, exe string) error {
@@ -370,20 +292,8 @@ func xmlEscape(s string) string {
 	return s
 }
 
-func shellQuote(s string) string {
-	return `'` + strings.ReplaceAll(s, `'`, `'"'"'`) + `'`
-}
-
 func appleString(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `"`, `\"`)
 	return `"` + s + `"`
-}
-
-func shellJoin(args []string) string {
-	var b []string
-	for _, a := range args {
-		b = append(b, shellQuote(a))
-	}
-	return strings.Join(b, " ")
 }

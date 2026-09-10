@@ -20,7 +20,7 @@ import (
 	"aster/internal/app"
 )
 
-var version = "1.0.0"
+var version = "1.1.0"
 
 func main() {
 	if runtime.GOOS != "darwin" {
@@ -45,17 +45,17 @@ func main() {
 
 	setupDaemonLog(application.Store().DaemonLogPath())
 
-	addr := application.ControlAddr()
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		resp, pingErr := http.Get(fmt.Sprintf("http://%s/api/v1/status", addr))
-		if pingErr == nil && resp.StatusCode == 200 {
-			_ = resp.Body.Close()
-			log.Printf("Aster 核心守护进程已在 %s 上健康运行，直接复用已有实例。", addr)
-			os.Exit(0)
-		}
-		log.Fatalf("无法监听端口 %s: %v（请检查是否被其他进程占用）", addr, err)
+	sock := application.ControlSocket()
+	if pingUnixStatus(sock) {
+		log.Printf("Aster 核心守护进程已在 %s 上健康运行，直接复用已有实例。", sock)
+		os.Exit(0)
 	}
+	_ = os.Remove(sock)
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		log.Fatalf("无法监听控制面 %s: %v", sock, err)
+	}
+	_ = os.Chmod(sock, 0o600)
 
 	if err := application.WriteDaemonPID(); err != nil {
 		log.Printf("写入 daemon.pid 失败: %v", err)
@@ -68,7 +68,7 @@ func main() {
 	application.StartBackground()
 
 	go func() {
-		log.Printf("Aster Core Daemon v%s 已就绪，正在监听: http://%s", version, addr)
+		log.Printf("Aster Core Daemon v%s 已就绪，正在监听: unix://%s", version, sock)
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("Aster HTTP/WS 服务异常终止: %v", err)
 		}
@@ -84,7 +84,26 @@ func main() {
 
 	_ = srv.Shutdown(ctx)
 	application.Shutdown()
+	_ = os.Remove(sock)
 	log.Println("Aster Core Daemon 已安全退出。")
+}
+
+func pingUnixStatus(path string) bool {
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+				var d net.Dialer
+				return d.DialContext(ctx, "unix", path)
+			},
+		},
+		Timeout: 500 * time.Millisecond,
+	}
+	resp, err := client.Get("http://localhost/api/v1/status")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 func setupDaemonLog(path string) {
