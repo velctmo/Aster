@@ -1,0 +1,396 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		D86C7F0617B6480CB30F072F /* InspectorWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = C68B712960B24B6CB857A757 /* InspectorWindow.swift */; };
+		E63888A9468E4328AE747BE5 /* AsterAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 429CA531BD1E45AEB572BEF1 /* AsterAPI.swift */; };
+		C0D887B7B6E04E1C99D1C7F7 /* AsterApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94449F43A2C042C09948E47B /* AsterApp.swift */; };
+		1048A0DF7B8C49ECA9D3E856 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60F5E942692548D5AFFF244B /* Models.swift */; };
+		8C728EED56324F838DA7DA4E /* UIComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C874DCD6D794C8987FC077F /* UIComponents.swift */; };
+		ED2C9E3889D0418692F45BDA /* Views.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55388AA439744F179FBC6E51 /* Views.swift */; };
+		6674B401E7F3476BADCED090 /* ViewsActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0AD11C0A5914E71AFE12687 /* ViewsActivity.swift */; };
+		F3488272E1F9452EBC5E5938 /* ViewsMain.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5D233BA858845B1BBFAC47D /* ViewsMain.swift */; };
+		307E14D3592C4A18AB275E0C /* ViewsOutbounds.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DB696D82C1041A68E3FE3B5 /* ViewsOutbounds.swift */; };
+		B38920A0CF8E444F9E98DEAC /* ViewsOverview.swift in Sources */ = {isa = PBXBuildFile; fileRef = 208BF510BB64458798B8676B /* ViewsOverview.swift */; };
+		CA2739FFD726432B88C47460 /* ViewsProfiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59A0C301B4964458ADDCF17C /* ViewsProfiles.swift */; };
+		4CE2FF4F519B45D4BC00A2CE /* ViewsRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0CB9B08A8092485A95A6456B /* ViewsRules.swift */; };
+		B6561FA8A41F4D1CADBC8C6D /* ViewsSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 893F088B94DC44579712B044 /* ViewsSettings.swift */; };
+		F1A8C00E0D2A4D30A1B2C3D4 /* WebDAVCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A8C00E0D2A4D30A1B2C3D5 /* WebDAVCredentialStore.swift */; };
+		F1A8C00E0D2A4D30A1B2C3D6 /* RealtimeStores.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A8C00E0D2A4D30A1B2C3D7 /* RealtimeStores.swift */; };
+		F1A8C00E0D2A4D30A1B2C3DB /* ConnectionSnapshotTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A8C00E0D2A4D30A1B2C3D8 /* ConnectionSnapshotTests.swift */; };
+		F1A8C00E0D2A4D30A1B2C3DC /* XCTest.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F1A8C00E0D2A4D30A1B2C3DA /* XCTest.framework */; };
+		F1A8C00E0D2A4D30A1B2C3F1 /* PreviewFixtures.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A8C00E0D2A4D30A1B2C3F2 /* PreviewFixtures.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		F1A8C00E0D2A4D30A1B2C3E4 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000002;
+			remoteInfo = Aster;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		C68B712960B24B6CB857A757 /* InspectorWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorWindow.swift; sourceTree = "<group>"; };
+		429CA531BD1E45AEB572BEF1 /* AsterAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsterAPI.swift; sourceTree = "<group>"; };
+		94449F43A2C042C09948E47B /* AsterApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsterApp.swift; sourceTree = "<group>"; };
+		60F5E942692548D5AFFF244B /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		7C874DCD6D794C8987FC077F /* UIComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIComponents.swift; sourceTree = "<group>"; };
+		55388AA439744F179FBC6E51 /* Views.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views.swift; sourceTree = "<group>"; };
+		E0AD11C0A5914E71AFE12687 /* ViewsActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewsActivity.swift; sourceTree = "<group>"; };
+		B5D233BA858845B1BBFAC47D /* ViewsMain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewsMain.swift; sourceTree = "<group>"; };
+		3DB696D82C1041A68E3FE3B5 /* ViewsOutbounds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewsOutbounds.swift; sourceTree = "<group>"; };
+		208BF510BB64458798B8676B /* ViewsOverview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewsOverview.swift; sourceTree = "<group>"; };
+		59A0C301B4964458ADDCF17C /* ViewsProfiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewsProfiles.swift; sourceTree = "<group>"; };
+		0CB9B08A8092485A95A6456B /* ViewsRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewsRules.swift; sourceTree = "<group>"; };
+		893F088B94DC44579712B044 /* ViewsSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewsSettings.swift; sourceTree = "<group>"; };
+		F1A8C00E0D2A4D30A1B2C3D5 /* WebDAVCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebDAVCredentialStore.swift; sourceTree = "<group>"; };
+		F1A8C00E0D2A4D30A1B2C3D7 /* RealtimeStores.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealtimeStores.swift; sourceTree = "<group>"; };
+		F1A8C00E0D2A4D30A1B2C3D8 /* ConnectionSnapshotTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionSnapshotTests.swift; sourceTree = "<group>"; };
+		F1A8C00E0D2A4D30A1B2C3D9 /* AsterTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AsterTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F1A8C00E0D2A4D30A1B2C3DA /* XCTest.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = XCTest.framework; path = System/Library/Frameworks/XCTest.framework; sourceTree = SDKROOT; };
+		F1A8C00E0D2A4D30A1B2C3F2 /* PreviewFixtures.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PreviewFixtures.swift; sourceTree = "<group>"; };
+		A10000000000000000000006 /* Aster.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Aster.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A10000000000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F1A8C00E0D2A4D30A1B2C3DF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F1A8C00E0D2A4D30A1B2C3DC /* XCTest.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A10000000000000000000007 = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000008 /* Sources */,
+				F1A8C00E0D2A4D30A1B2C3DD /* AsterTests */,
+				A10000000000000000000009 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A10000000000000000000008 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				C68B712960B24B6CB857A757 /* InspectorWindow.swift */,
+				429CA531BD1E45AEB572BEF1 /* AsterAPI.swift */,
+				94449F43A2C042C09948E47B /* AsterApp.swift */,
+				60F5E942692548D5AFFF244B /* Models.swift */,
+				7C874DCD6D794C8987FC077F /* UIComponents.swift */,
+				55388AA439744F179FBC6E51 /* Views.swift */,
+				E0AD11C0A5914E71AFE12687 /* ViewsActivity.swift */,
+				B5D233BA858845B1BBFAC47D /* ViewsMain.swift */,
+				3DB696D82C1041A68E3FE3B5 /* ViewsOutbounds.swift */,
+				208BF510BB64458798B8676B /* ViewsOverview.swift */,
+				59A0C301B4964458ADDCF17C /* ViewsProfiles.swift */,
+				0CB9B08A8092485A95A6456B /* ViewsRules.swift */,
+				893F088B94DC44579712B044 /* ViewsSettings.swift */,
+				F1A8C00E0D2A4D30A1B2C3D5 /* WebDAVCredentialStore.swift */,
+				F1A8C00E0D2A4D30A1B2C3D7 /* RealtimeStores.swift */,
+				F1A8C00E0D2A4D30A1B2C3F2 /* PreviewFixtures.swift */,
+			);
+			name = Sources;
+			path = Sources/Aster;
+			sourceTree = "<group>";
+		};
+		F1A8C00E0D2A4D30A1B2C3DD /* AsterTests */ = {
+			isa = PBXGroup;
+			children = (
+				F1A8C00E0D2A4D30A1B2C3D8 /* ConnectionSnapshotTests.swift */,
+			);
+			path = Tests/AsterTests;
+			sourceTree = "<group>";
+		};
+		A10000000000000000000009 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000006 /* Aster.app */,
+				F1A8C00E0D2A4D30A1B2C3D9 /* AsterTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A10000000000000000000002 /* Aster */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1000000000000000000000B /* Build configuration list for PBXNativeTarget "Aster" */;
+			buildPhases = (
+				A10000000000000000000003 /* Sources */,
+				A10000000000000000000005 /* Frameworks */,
+				A10000000000000000000004 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Aster;
+			productName = Aster;
+			productReference = A10000000000000000000006 /* Aster.app */;
+			productType = "com.apple.product-type.application";
+		};
+		F1A8C00E0D2A4D30A1B2C3E0 /* AsterTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = F1A8C00E0D2A4D30A1B2C3E1 /* Build configuration list for PBXNativeTarget "AsterTests" */;
+			buildPhases = (
+				F1A8C00E0D2A4D30A1B2C3DE /* Sources */,
+				F1A8C00E0D2A4D30A1B2C3DF /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				F1A8C00E0D2A4D30A1B2C3E5 /* PBXTargetDependency */,
+			);
+			name = AsterTests;
+			productName = AsterTests;
+			productReference = F1A8C00E0D2A4D30A1B2C3D9 /* AsterTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A10000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+			};
+			buildConfigurationList = A1000000000000000000000A /* Build configuration list for PBXProject "Aster" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+				"zh-Hans",
+			);
+			mainGroup = A10000000000000000000007;
+			productRefGroup = A10000000000000000000009 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A10000000000000000000002 /* Aster */,
+				F1A8C00E0D2A4D30A1B2C3E0 /* AsterTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A10000000000000000000004 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A10000000000000000000003 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D86C7F0617B6480CB30F072F /* InspectorWindow.swift in Sources */,
+				E63888A9468E4328AE747BE5 /* AsterAPI.swift in Sources */,
+				C0D887B7B6E04E1C99D1C7F7 /* AsterApp.swift in Sources */,
+				1048A0DF7B8C49ECA9D3E856 /* Models.swift in Sources */,
+				8C728EED56324F838DA7DA4E /* UIComponents.swift in Sources */,
+				ED2C9E3889D0418692F45BDA /* Views.swift in Sources */,
+				6674B401E7F3476BADCED090 /* ViewsActivity.swift in Sources */,
+				F3488272E1F9452EBC5E5938 /* ViewsMain.swift in Sources */,
+				307E14D3592C4A18AB275E0C /* ViewsOutbounds.swift in Sources */,
+				B38920A0CF8E444F9E98DEAC /* ViewsOverview.swift in Sources */,
+				CA2739FFD726432B88C47460 /* ViewsProfiles.swift in Sources */,
+				4CE2FF4F519B45D4BC00A2CE /* ViewsRules.swift in Sources */,
+				B6561FA8A41F4D1CADBC8C6D /* ViewsSettings.swift in Sources */,
+				F1A8C00E0D2A4D30A1B2C3D4 /* WebDAVCredentialStore.swift in Sources */,
+				F1A8C00E0D2A4D30A1B2C3D6 /* RealtimeStores.swift in Sources */,
+				F1A8C00E0D2A4D30A1B2C3F1 /* PreviewFixtures.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F1A8C00E0D2A4D30A1B2C3DE /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F1A8C00E0D2A4D30A1B2C3DB /* ConnectionSnapshotTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A1000000000000000000000C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A1000000000000000000000D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+			};
+			name = Release;
+		};
+		A1000000000000000000000E /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGNING_ALLOWED = NO;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Aster;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 NoSugar Studio";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.aster;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		A1000000000000000000000F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGNING_ALLOWED = NO;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Aster;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "Copyright © 2026 NoSugar Studio";
+				INFOPLIST_KEY_NSPrincipalClass = NSApplication;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.aster;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		F1A8C00E0D2A4D30A1B2C3E2 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.aster.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Aster.app/Contents/MacOS/Aster";
+				TEST_TARGET_NAME = Aster;
+			};
+			name = Debug;
+		};
+		F1A8C00E0D2A4D30A1B2C3E3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.aster.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Aster.app/Contents/MacOS/Aster";
+				TEST_TARGET_NAME = Aster;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A1000000000000000000000A /* Build configuration list for PBXProject "Aster" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1000000000000000000000C /* Debug */,
+				A1000000000000000000000D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1000000000000000000000B /* Build configuration list for PBXNativeTarget "Aster" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1000000000000000000000E /* Debug */,
+				A1000000000000000000000F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		F1A8C00E0D2A4D30A1B2C3E1 /* Build configuration list for PBXNativeTarget "AsterTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F1A8C00E0D2A4D30A1B2C3E2 /* Debug */,
+				F1A8C00E0D2A4D30A1B2C3E3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin PBXTargetDependency section */
+		F1A8C00E0D2A4D30A1B2C3E5 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A10000000000000000000002 /* Aster */;
+			targetProxy = F1A8C00E0D2A4D30A1B2C3E4 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+	};
+	rootObject = A10000000000000000000001 /* Project object */;
+}

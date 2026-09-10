@@ -1,0 +1,25 @@
+#!/bin/zsh
+set -eu
+
+label="app.aster.helper"
+plist="/Library/LaunchDaemons/${label}.plist"
+runtime="/Library/Application Support/Aster/runtime"
+
+install -d -o root -g wheel -m 700 "/Library/Application Support/Aster" "$runtime"
+console_uid="$(stat -f '%u' /dev/console)"
+if [[ "$console_uid" -le 0 ]]; then
+  echo "Aster installation requires a logged-in console user" >&2
+  exit 1
+fi
+printf '%s\n' "$console_uid" > "/Library/Application Support/Aster/allowed-uid"
+chown root:wheel "/Library/Application Support/Aster/allowed-uid"
+chmod 600 "/Library/Application Support/Aster/allowed-uid"
+chown root:wheel "/Library/Application Support/Aster/aster-helper"
+chmod 755 "/Library/Application Support/Aster/aster-helper"
+chown root:wheel "/Applications/Aster.app/Contents/Resources/sing-box"
+chmod 755 "/Applications/Aster.app/Contents/Resources/sing-box"
+chown root:wheel "$plist"
+chmod 644 "$plist"
+launchctl bootout system "$plist" >/dev/null 2>&1 || true
+launchctl bootstrap system "$plist"
+exit 0

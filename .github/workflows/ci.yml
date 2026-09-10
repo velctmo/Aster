@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  go-test:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+      - name: Test with race detector
+        run: GOOS=darwin GOARCH=arm64 go test -race ./...
+
+  build-app:
+    runs-on: macos-14
+    needs: go-test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+      - name: Validate packaging script
+        run: |
+          bash -n scripts/build_aster_mac.sh
+          bash -n scripts/build_aster_pkg.sh
+          zsh -n packaging/scripts/postinstall
+      - name: Build app
+        run: make app
+        env:
+          SING_BOX_VERSION: "1.14.0"
+      - name: Build unsigned PKG
+        run: make pkg
+        env:
+          SING_BOX_VERSION: "1.14.0"
+      - name: Verify Apple Silicon artifacts
+        run: |
+          test "$(uname -m)" = "arm64"
+          file build/Aster.app/Contents/MacOS/Aster | grep -q "arm64"
+          file build/Aster.app/Contents/Resources/aster-daemon | grep -q "arm64"
+          file build/Aster.app/Contents/Resources/sing-box | grep -q "arm64"
+          codesign --verify --deep --strict build/Aster.app
+          unzip -Z1 build/Aster-macos-arm64.zip | grep -q 'Aster.app/Contents/Resources/sing-box'
+          pkgutil --payload-files build/Aster-unsigned.pkg | grep -q 'Library/Application Support/Aster/aster-helper'
+      - name: Validate bundled core performance gate
+        run: GOOS=darwin GOARCH=arm64 go test -count=1 ./internal/render -run 'TestBundledSingBox(Checks500Nodes|Serves100ConcurrentProxyConnections)'
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Aster-macos
+          path: |
+            build/Aster.app
+            build/Aster-macos-*.zip
+            build/Aster-unsigned.pkg
+          if-no-files-found: error

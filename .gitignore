@@ -1,0 +1,23 @@
+.DS_Store
+.metadata_never_index
+
+# Build artifacts & Binaries
+bin/
+build/
+*.app
+.build/
+vendor/cores/
+*.zip
+main
+
+# Xcode user state
+*.xcuserstate
+xcuserdata/
+DerivedData/
+
+# Logs & temporary files
+*.log
+*.swp
+*.swo
+*~
+
