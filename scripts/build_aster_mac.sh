@@ -28,40 +28,47 @@ chmod +x bin/aster-daemon
 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o bin/aster-helper ./cmd/aster-helper
 chmod +x bin/aster-helper
 
-SWIFT_SOURCES=(
-  macos-native/Sources/Aster/Models.swift
-  macos-native/Sources/Aster/RealtimeStores.swift
-  macos-native/Sources/Aster/WebDAVCredentialStore.swift
-  macos-native/Sources/Aster/AsterAPI.swift
-  macos-native/Sources/Aster/UIComponents.swift
-  macos-native/Sources/Aster/InspectorWindow.swift
-  macos-native/Sources/Aster/AddRuleModalView.swift
-  macos-native/Sources/Aster/Views.swift
-  macos-native/Sources/Aster/ViewsMain.swift
-  macos-native/Sources/Aster/ViewsActivity.swift
-  macos-native/Sources/Aster/ViewsOverview.swift
-  macos-native/Sources/Aster/ViewsOutbounds.swift
-  macos-native/Sources/Aster/ViewsProfiles.swift
-  macos-native/Sources/Aster/ViewsScripts.swift
-  macos-native/Sources/Aster/ViewsRules.swift
-  macos-native/Sources/Aster/ViewsSettings.swift
-  macos-native/Sources/Aster/PreviewFixtures.swift
-  macos-native/Sources/Aster/AsterApp.swift
-)
+shopt -s nullglob
+SWIFT_SOURCES=(macos-native/Sources/Aster/*.swift)
+if [[ ${#SWIFT_SOURCES[@]} -eq 0 ]]; then
+  echo "错误: 没有找到 macos-native/Sources/Aster/*.swift" >&2
+  exit 1
+fi
+PBXPROJ="macos-native/Aster.xcodeproj/project.pbxproj"
+if [[ -f "$PBXPROJ" ]]; then
+  missing=()
+  for src in "${SWIFT_SOURCES[@]}"; do
+    base="${src##*/}"
+    if ! grep -qF "$base" "$PBXPROJ"; then
+      missing+=("$base")
+    fi
+  done
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    echo "错误: Xcode 工程未收录 Swift 源文件: ${missing[*]}" >&2
+    exit 1
+  fi
+fi
 
 echo "  [2/5] 编译 Aster SwiftUI 客户端..."
 SWIFT_BUILT=0
 # xcodebuild 存在于 Command Line Tools，但没有完整 Xcode 时会直接失败；失败则回退 swiftc
 if [[ -d macos-native/Aster.xcodeproj ]] && command -v xcodebuild >/dev/null 2>&1 \
   && xcodebuild -version >/dev/null 2>&1; then
+  XCODE_LOG="build/xcodebuild.log"
   if xcodebuild -project macos-native/Aster.xcodeproj -scheme Aster -configuration Release \
     -destination 'platform=macOS,arch=arm64' \
-    -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO build >/dev/null 2>&1; then
+    -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO build >"$XCODE_LOG" 2>&1; then
     BUILT_APP=$(find build/DerivedData -name 'Aster.app' -type d | head -1 || true)
     if [[ -n "${BUILT_APP:-}" ]]; then
       cp "$BUILT_APP/Contents/MacOS/Aster" bin/Aster
       SWIFT_BUILT=1
+    else
+      echo "  xcodebuild 成功但未找到 Aster.app，回退 swiftc。日志末尾："
+      tail -n 40 "$XCODE_LOG" || true
     fi
+  else
+    echo "  xcodebuild 失败，回退 swiftc。日志末尾："
+    tail -n 80 "$XCODE_LOG" || true
   fi
 fi
 if [[ "$SWIFT_BUILT" -ne 1 ]]; then
@@ -71,7 +78,11 @@ if [[ "$SWIFT_BUILT" -ne 1 ]]; then
   if ! swiftc --version 2>&1 | grep -Eq 'Swift version [6-9]'; then
     SWIFT_VER="5"
   fi
-  swiftc -module-cache-path "$(pwd)/build/ModuleCache" -Xcc -fmodules-cache-path="$(pwd)/build/ModuleCache" -swift-version "$SWIFT_VER" -parse-as-library -O "${SWIFT_SOURCES[@]}" -o bin/Aster
+  SWIFT_FLAGS=(-module-cache-path "$(pwd)/build/ModuleCache" -Xcc -fmodules-cache-path="$(pwd)/build/ModuleCache" -swift-version "$SWIFT_VER" -parse-as-library -O)
+  if [[ "$SWIFT_VER" == "6" ]]; then
+    SWIFT_FLAGS+=(-strict-concurrency=complete)
+  fi
+  swiftc "${SWIFT_FLAGS[@]}" "${SWIFT_SOURCES[@]}" -o bin/Aster
 fi
 chmod +x bin/Aster
 rm -rf build/ModuleCache

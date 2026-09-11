@@ -39,6 +39,17 @@ jobs:
           bash -n scripts/build_aster_mac.sh
           bash -n scripts/build_aster_pkg.sh
           zsh -n packaging/scripts/postinstall
+          missing=""
+          for src in macos-native/Sources/Aster/*.swift; do
+            base="$(basename "$src")"
+            if ! grep -qF "$base" macos-native/Aster.xcodeproj/project.pbxproj; then
+              missing="$missing $base"
+            fi
+          done
+          if [ -n "$missing" ]; then
+            echo "Xcode project is missing Swift sources:$missing" >&2
+            exit 1
+          fi
       - name: Build app
         run: make app
         env:

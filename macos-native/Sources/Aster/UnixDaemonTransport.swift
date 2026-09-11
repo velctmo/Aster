@@ -192,7 +192,7 @@ enum UnixDaemonTransport {
     }
 }
 
-final class UnixWebSocket {
+final class UnixWebSocket: @unchecked Sendable {
     private let path: String
     private let token: String
     private var connection: NWConnection?
@@ -216,7 +216,9 @@ final class UnixWebSocket {
         }
         started = true
         lock.unlock()
-        Task { await self.open() }
+        Task { [self] in
+            await open()
+        }
     }
 
     func cancel(with closeCode: URLSessionWebSocketTask.CloseCode = .goingAway, reason: Data? = nil) {
@@ -347,9 +349,8 @@ final class UnixWebSocket {
 
     private func sendPong(_ payload: Data) {
         guard let conn = connection else { return }
-        Task {
-            try? await UnixDaemonTransport.send(conn, Self.encodeFrame(opcode: 0xA, payload: payload))
-        }
+        let frame = Self.encodeFrame(opcode: 0xA, payload: payload)
+        conn.send(content: frame, completion: .contentProcessed { _ in })
     }
 
     private struct Frame {

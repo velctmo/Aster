@@ -34,8 +34,10 @@ public struct ActivityDashboardView: View {
                     liveConnectionsStreamSection(availableHeight: availableHeight)
                 }
                 .onPreferenceChange(TopContentHeightKey.self) { newH in
-                    if newH > 50 && abs(topContentHeight - newH) > 1 {
-                        topContentHeight = newH
+                    Task { @MainActor in
+                        if newH > 50 && abs(topContentHeight - newH) > 1 {
+                            topContentHeight = newH
+                        }
                     }
                 }
                 .padding(.horizontal, DesignTokens.pagePadding)

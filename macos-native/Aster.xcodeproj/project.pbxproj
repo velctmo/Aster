@@ -10,6 +10,8 @@
 		D86C7F0617B6480CB30F072F /* InspectorWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = C68B712960B24B6CB857A757 /* InspectorWindow.swift */; };
 		E63888A9468E4328AE747BE5 /* AsterAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 429CA531BD1E45AEB572BEF1 /* AsterAPI.swift */; };
 		A8C1E2F3D4B5467A8C9D0E1F /* UnixDaemonTransport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8C1E2F3D4B5467A8C9D0E20 /* UnixDaemonTransport.swift */; };
+		A8C1E2F3D4B5467A8C9D0E22 /* AddRuleModalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8C1E2F3D4B5467A8C9D0E21 /* AddRuleModalView.swift */; };
+		A8C1E2F3D4B5467A8C9D0E24 /* ViewsScripts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8C1E2F3D4B5467A8C9D0E23 /* ViewsScripts.swift */; };
 		C0D887B7B6E04E1C99D1C7F7 /* AsterApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94449F43A2C042C09948E47B /* AsterApp.swift */; };
 		1048A0DF7B8C49ECA9D3E856 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60F5E942692548D5AFFF244B /* Models.swift */; };
 		8C728EED56324F838DA7DA4E /* UIComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C874DCD6D794C8987FC077F /* UIComponents.swift */; };
@@ -42,6 +44,8 @@
 		C68B712960B24B6CB857A757 /* InspectorWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InspectorWindow.swift; sourceTree = "<group>"; };
 		429CA531BD1E45AEB572BEF1 /* AsterAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsterAPI.swift; sourceTree = "<group>"; };
 		A8C1E2F3D4B5467A8C9D0E20 /* UnixDaemonTransport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UnixDaemonTransport.swift; sourceTree = "<group>"; };
+		A8C1E2F3D4B5467A8C9D0E21 /* AddRuleModalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddRuleModalView.swift; sourceTree = "<group>"; };
+		A8C1E2F3D4B5467A8C9D0E23 /* ViewsScripts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewsScripts.swift; sourceTree = "<group>"; };
 		94449F43A2C042C09948E47B /* AsterApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsterApp.swift; sourceTree = "<group>"; };
 		60F5E942692548D5AFFF244B /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		7C874DCD6D794C8987FC077F /* UIComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIComponents.swift; sourceTree = "<group>"; };
@@ -96,6 +100,8 @@
 				C68B712960B24B6CB857A757 /* InspectorWindow.swift */,
 				429CA531BD1E45AEB572BEF1 /* AsterAPI.swift */,
 				A8C1E2F3D4B5467A8C9D0E20 /* UnixDaemonTransport.swift */,
+				A8C1E2F3D4B5467A8C9D0E21 /* AddRuleModalView.swift */,
+				A8C1E2F3D4B5467A8C9D0E23 /* ViewsScripts.swift */,
 				94449F43A2C042C09948E47B /* AsterApp.swift */,
 				60F5E942692548D5AFFF244B /* Models.swift */,
 				7C874DCD6D794C8987FC077F /* UIComponents.swift */,
@@ -217,6 +223,8 @@
 				D86C7F0617B6480CB30F072F /* InspectorWindow.swift in Sources */,
 				E63888A9468E4328AE747BE5 /* AsterAPI.swift in Sources */,
 				A8C1E2F3D4B5467A8C9D0E1F /* UnixDaemonTransport.swift in Sources */,
+				A8C1E2F3D4B5467A8C9D0E22 /* AddRuleModalView.swift in Sources */,
+				A8C1E2F3D4B5467A8C9D0E24 /* ViewsScripts.swift in Sources */,
 				C0D887B7B6E04E1C99D1C7F7 /* AsterApp.swift in Sources */,
 				1048A0DF7B8C49ECA9D3E856 /* Models.swift in Sources */,
 				8C728EED56324F838DA7DA4E /* UIComponents.swift in Sources */,
