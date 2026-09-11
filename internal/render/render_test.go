@@ -101,11 +101,210 @@ func TestConfigHasSelectorAndClashAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(b)
-	for _, need := range []string{`"tag": "proxy"`, `"tag": "auto"`, `"type": "selector"`, `"type": "urltest"`, `127.0.0.1:9090`, `"hijack-dns"`, `"find_process"`, `198.18.0.0/15`, `223.5.5.5`} {
+	for _, need := range []string{`"tag": "proxy"`, `"type": "selector"`, `"cache_file"`, `127.0.0.1:9090`, `"hijack-dns"`, `"find_process"`, `198.18.0.0/15`, `223.5.5.5`} {
 		if !strings.Contains(s, need) {
 			t.Fatalf("missing %s in %s", need, s[:min(len(s), 400)])
 		}
 	}
+}
+
+func TestNodePoolDefaultHasSingleProxyGroup(t *testing.T) {
+	f := state.DefaultFile()
+	f = withNode(f, state.Node{
+		ID: "n", Name: "n1", Protocol: "vless",
+		Outbound: json.RawMessage(`{"type":"vless","server":"x.com","server_port":443,"uuid":"u"}`),
+	})
+	b, err := Config(f, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy, groups, hasAuto := parseStrategyOutbounds(t, b)
+	if hasAuto {
+		t.Fatal("node pool must not inject a default auto urltest")
+	}
+	if len(groups) != 1 || groups[0] != "proxy" {
+		t.Fatalf("default groups=%v", groups)
+	}
+	if len(proxy) != 2 || proxy[0] != "direct" || proxy[1] != "n1" {
+		t.Fatalf("proxy members=%v", proxy)
+	}
+	groupsOut, err := Groups(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groupsOut) != 1 || groupsOut[0].Tag != "proxy" || groupsOut[0].Name != "节点选择" {
+		t.Fatalf("groups=%+v", groupsOut)
+	}
+}
+
+func TestNodePoolEmptyProxyFallsBackToDirect(t *testing.T) {
+	b, err := Config(state.DefaultFile(), t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy, _, hasAuto := parseStrategyOutbounds(t, b)
+	if hasAuto {
+		t.Fatal("empty node pool must not inject auto")
+	}
+	if len(proxy) != 1 || proxy[0] != "direct" {
+		t.Fatalf("empty proxy members=%v", proxy)
+	}
+}
+
+func TestConfigPersistsSelectedIntoProxyDefault(t *testing.T) {
+	f := state.DefaultFile()
+	f = withNode(f, state.Node{
+		ID: "n", Name: "hk-01", Protocol: "vless",
+		Outbound: json.RawMessage(`{"type":"vless","server":"x.com","server_port":443,"uuid":"u"}`),
+	})
+	f.Selected = "hk-01"
+	b, err := Config(f, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cfg struct {
+		Outbounds []struct {
+			Tag     string   `json:"tag"`
+			Type    string   `json:"type"`
+			Default string   `json:"default"`
+			Members []string `json:"outbounds"`
+		} `json:"outbounds"`
+	}
+	if err := json.Unmarshal(b, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, outbound := range cfg.Outbounds {
+		if outbound.Tag != "proxy" || outbound.Type != "selector" {
+			continue
+		}
+		found = true
+		if outbound.Default != "hk-01" {
+			t.Fatalf("proxy default=%q members=%v", outbound.Default, outbound.Members)
+		}
+	}
+	if !found {
+		t.Fatal("missing proxy selector")
+	}
+	groups, err := Groups(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 1 || groups[0].Now != "hk-01" {
+		t.Fatalf("groups now=%+v", groups)
+	}
+}
+
+func TestConfigAppliesSelectorNowAfterScript(t *testing.T) {
+	f := state.DefaultFile()
+	f = withNode(f, state.Node{
+		ID: "n", Name: "hk-01", Protocol: "vless",
+		Outbound: json.RawMessage(`{"type":"vless","server":"x.com","server_port":443,"uuid":"u"}`),
+	})
+	f.Selected = "hk-01"
+	f.SelectorNow = map[string]string{"香港": "hk-01"}
+	p := f.ActiveProfile()
+	for i := range f.Profiles {
+		if f.Profiles[i].ID == p.ID {
+			f.Profiles[i].Script = `function main(config) {
+  config.outbounds.push({type:'selector', tag:'香港', outbounds:['hk-01','direct']});
+  const proxy = config.outbounds.find(o => o.tag === 'proxy');
+  if (proxy) delete proxy.default;
+  return config;
+}`
+		}
+	}
+	b, err := Config(f, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups, err := Groups(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var proxyNow, hkNow string
+	for _, group := range groups {
+		switch group.Tag {
+		case "proxy":
+			proxyNow = group.Now
+		case "香港":
+			hkNow = group.Now
+		}
+	}
+	if proxyNow != "hk-01" {
+		t.Fatalf("proxy now=%q groups=%+v", proxyNow, groups)
+	}
+	if hkNow != "hk-01" {
+		t.Fatalf("hongkong now=%q groups=%+v", hkNow, groups)
+	}
+}
+
+func TestNodePoolScriptAddsUrltestGroups(t *testing.T) {
+	f := state.DefaultFile()
+	f = withNode(f, state.Node{
+		ID: "n", Name: "日本01", Protocol: "vless",
+		Outbound: json.RawMessage(`{"type":"vless","server":"x.com","server_port":443,"uuid":"u"}`),
+	})
+	p := f.ActiveProfile()
+	for i := range f.Profiles {
+		if f.Profiles[i].ID == p.ID {
+			f.Profiles[i].Script = `function main(config) {
+  const skip = new Set(['direct','proxy','reject','block','dns']);
+  const tags = (config.outbounds || []).filter(o => o.tag && !skip.has(o.tag) && o.type !== 'selector' && o.type !== 'urltest' && o.type !== 'fallback').map(o => o.tag);
+  config.outbounds.push({type:'urltest', tag:'日本', outbounds: tags, url:'https://www.gstatic.com/generate_204', tolerance:50});
+  const proxy = config.outbounds.find(o => o.tag === 'proxy');
+  if (proxy) proxy.outbounds = ['日本'].concat(tags);
+  return config;
+}`
+		}
+	}
+	b, err := Config(f, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups, err := Groups(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 2 {
+		t.Fatalf("groups=%+v", groups)
+	}
+	if groups[0].Tag != "proxy" || groups[0].Name != "节点选择" {
+		t.Fatalf("main group=%+v", groups[0])
+	}
+	if len(groups[0].Members) != 2 || groups[0].Members[0] != "日本" {
+		t.Fatalf("proxy members=%v", groups[0].Members)
+	}
+	if groups[1].Tag != "日本" || groups[1].Type != "urltest" {
+		t.Fatalf("region group=%+v", groups[1])
+	}
+}
+
+func parseStrategyOutbounds(t *testing.T, raw []byte) (proxy []string, groups []string, hasAuto bool) {
+	t.Helper()
+	var cfg struct {
+		Outbounds []struct {
+			Type      string   `json:"type"`
+			Tag       string   `json:"tag"`
+			Outbounds []string `json:"outbounds"`
+		} `json:"outbounds"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, outbound := range cfg.Outbounds {
+		if outbound.Tag == "auto" {
+			hasAuto = true
+		}
+		switch outbound.Type {
+		case "selector", "urltest", "fallback":
+			groups = append(groups, outbound.Tag)
+		}
+		if outbound.Tag == "proxy" {
+			proxy = outbound.Outbounds
+		}
+	}
+	return proxy, groups, hasAuto
 }
 
 func TestConfigUsesExplicitDirectHTTPClientForRemoteRuleSets(t *testing.T) {

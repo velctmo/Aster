@@ -125,6 +125,32 @@ public struct VisualEffectView: NSViewRepresentable {
     }
 }
 
+// MARK: - Aster 品牌标（Dock 同款 icns，避免 SF Symbol 盾牌/旧星形残留）
+public struct AsterBrandMark: View {
+    public var size: CGFloat = 32
+
+    public init(size: CGFloat = 32) {
+        self.size = size
+    }
+
+    public var body: some View {
+        Image(nsImage: Self.resolvedIcon)
+            .resizable()
+            .interpolation(.high)
+            .aspectRatio(contentMode: .fit)
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+    }
+
+    public static var resolvedIcon: NSImage {
+        if let url = Bundle.main.url(forResource: "Aster", withExtension: "icns"),
+           let image = NSImage(contentsOf: url) {
+            return image
+        }
+        return NSApp.applicationIconImage
+    }
+}
+
 // MARK: - 本地原生应用图标提取器 (NSWorkspace)
 public struct AppIconView: View {
     public var processPath: String
@@ -272,6 +298,69 @@ public enum NodeNameSanitizer {
             }
         }
         return trimmed.isEmpty ? raw : trimmed
+    }
+}
+
+/// 策略组展示与选择的单一规则：主界面和状态栏菜单必须走这里，避免两套逻辑再分叉。
+public enum StrategyPresentation {
+    public static func memberTitle(tag: String, node: ProxyNode?, autoWinner: String?) -> String {
+        switch tag {
+        case "direct":
+            return "DIRECT"
+        case "block", "reject":
+            return "REJECT"
+        case "auto":
+            if let autoWinner, !autoWinner.isEmpty {
+                return "♻️ 自动优选 ➔ \(clean(autoWinner))"
+            }
+            return "♻️ 自动优选"
+        default:
+            return clean(node?.name ?? tag)
+        }
+    }
+
+    public static func selectedTag(in group: StrategyGroup, fallbackSelected: String) -> String {
+        if let now = group.now, !now.isEmpty {
+            return now
+        }
+        if group.tag == "proxy" || group.tag == fallbackSelected {
+            return fallbackSelected
+        }
+        return ""
+    }
+
+    public static func selectedLabel(tag: String, node: ProxyNode?, autoWinner: String?) -> String {
+        if tag.isEmpty { return "" }
+        if tag == "auto" {
+            if let autoWinner, !autoWinner.isEmpty {
+                return "自动 ➔ \(clean(autoWinner))"
+            }
+            return "自动优选"
+        }
+        return memberTitle(tag: tag, node: node, autoWinner: autoWinner)
+    }
+
+    public static func canSelect(group: StrategyGroup, tag: String) -> Bool {
+        group.type == "selector" && group.members.contains(tag)
+    }
+
+    public static func isSelected(group: StrategyGroup, tag: String, fallbackSelected: String) -> Bool {
+        selectedTag(in: group, fallbackSelected: fallbackSelected) == tag
+    }
+
+    public static func canTest(tag: String) -> Bool {
+        tag != "direct" && tag != "block" && tag != "reject" && tag != "dns"
+    }
+
+    public static func memberDelay(tag: String, node: ProxyNode?, autoDelay: Int, statusDelay: Int) -> Int {
+        if tag == "auto" {
+            return autoDelay > 0 ? autoDelay : statusDelay
+        }
+        return node?.delayMs ?? 0
+    }
+
+    private static func clean(_ raw: String) -> String {
+        NodeNameSanitizer.clean(raw)
     }
 }
 

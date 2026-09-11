@@ -20,8 +20,15 @@ func (a *App) SpeedtestNode(tag string) (float64, error) {
 	a.speedtestMu.Lock()
 	defer a.speedtestMu.Unlock()
 	realTag := tag
-	found := tag == "auto" || tag == "direct"
-	if tag != "auto" {
+	found := tag == "direct"
+	if tag == "auto" {
+		for _, n := range a.Nodes() {
+			if n.Tag == "auto" {
+				found = true
+				break
+			}
+		}
+	} else if tag != "direct" {
 		for _, n := range a.Nodes() {
 			if n.ID == tag {
 				realTag = n.Tag

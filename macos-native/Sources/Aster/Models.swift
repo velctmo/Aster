@@ -38,8 +38,8 @@ public struct AppStatus: Codable, Equatable, Sendable {
         error: "",
         mode: "rule",
         capture: CaptureSettings(systemProxy: false, tun: false),
-        selected: "auto",
-        selectedLabel: "自动选择",
+        selected: "",
+        selectedLabel: "节点选择",
         delayMs: 0,
         upload: 0,
         download: 0,
@@ -246,6 +246,27 @@ public struct StrategyGroup: Codable, Identifiable, Hashable, Sendable {
     public var leafTags: [String]
     public var delayMs: Int?
     public var id: String { tag }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        tag = try container.decode(String.self, forKey: .tag)
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? tag
+        type = try container.decode(String.self, forKey: .type)
+        now = try container.decodeIfPresent(String.self, forKey: .now)
+        members = try container.decodeIfPresent([String].self, forKey: .members) ?? []
+        leafTags = try container.decodeIfPresent([String].self, forKey: .leafTags) ?? []
+        delayMs = try container.decodeIfPresent(Int.self, forKey: .delayMs)
+    }
+
+    public init(tag: String, name: String, type: String, now: String? = nil, members: [String], leafTags: [String], delayMs: Int? = nil) {
+        self.tag = tag
+        self.name = name
+        self.type = type
+        self.now = now
+        self.members = members
+        self.leafTags = leafTags
+        self.delayMs = delayMs
+    }
 }
 
 // MARK: - 3. 分流规则模型

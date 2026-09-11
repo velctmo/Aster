@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Aster macOS Dock</title>
+  <desc>Pre-rounded squircle on a transparent 1024 canvas, 13/16 live area like Sparkle/Surge icns. macOS does not remask .icns.</desc>
+  <defs>
+    <linearGradient id="bgGrad" x1="160" y1="40" x2="920" y2="1000" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6EB8C8"/>
+      <stop offset="1" stop-color="#4A3A78"/>
+    </linearGradient>
+    <linearGradient id="moonGlass" x1="360" y1="240" x2="720" y2="780" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F5F2FF"/>
+      <stop offset="1" stop-color="#C9B8DC"/>
+    </linearGradient>
+  </defs>
+  <!-- 13/16 design area, 96px transparent margin, legacy 22.37% squircle -->
+  <g transform="translate(96 96)">
+    <path id="bg" d="M 534.21 0 c 104.24 0 156.35 0 196.17 20.29 a 186.12 186.12 0 0 1 81.34 81.34 c 20.29 39.81 20.29 91.93 20.29 196.17 L 832 534.21 c 0 104.24 0 156.35 -20.29 196.17 a 186.12 186.12 0 0 1 -81.34 81.34 c -39.81 20.29 -91.93 20.29 -196.17 20.29 L 297.79 832 c -104.24 0 -156.35 0 -196.17 -20.29 a 186.12 186.12 0 0 1 -81.34 -81.34 c -20.29 -39.81 -20.29 -91.93 -20.29 -196.17 L 0 297.79 c 0 -104.24 0 -156.35 20.29 -196.17 a 186.12 186.12 0 0 1 81.34 -81.34 c 39.81 -20.29 91.93 -20.29 196.17 -20.29 Z" fill="url(#bgGrad)"/>
+    <g transform="scale(0.8125)">
+      <circle cx="430" cy="590" r="268" fill="#FFFFFF" fill-opacity="0.16"/>
+      <circle cx="548" cy="456" r="248" fill="url(#moonGlass)" fill-opacity="0.82"/>
+      <path d="M 70 640 C 230 540 400 310 510 268 C 555 240 590 300 575 420 C 565 500 500 590 410 615 C 350 632 400 540 540 400 C 610 330 740 310 820 355 C 870 380 860 430 780 460 C 700 490 640 520 620 545 C 700 555 840 548 875 575 C 910 600 880 655 755 658" fill="none" stroke="#C4B4E8" stroke-width="84" stroke-linecap="round" stroke-linejoin="round" opacity="0.45"/>
+      <path d="M 70 640 C 230 540 400 310 510 268 C 555 240 590 300 575 420 C 565 500 500 590 410 615 C 350 632 400 540 540 400 C 610 330 740 310 820 355 C 870 380 860 430 780 460 C 700 490 640 520 620 545 C 700 555 840 548 875 575 C 910 600 880 655 755 658" fill="none" stroke="#F6F3FF" stroke-width="50" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+</svg>

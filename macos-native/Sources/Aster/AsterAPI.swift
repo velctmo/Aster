@@ -59,10 +59,62 @@ public class AsterState: ObservableObject {
     @Published public var isConnected: Bool = false
     @Published public var isTestingDelays: Bool = false
     @Published public var testingTags: Set<String> = [] // 节点独立测速中集合
+    @Published public var testingGroupTag: String? = nil
     @Published public var testingSpeedTags: Set<String> = [] // 独立真实带宽吞吐测速中集合
 
     public func isNodeTesting(_ tag: String) -> Bool {
         return testingTags.contains(tag)
+    }
+
+    public func isTestingGroup(_ group: StrategyGroup) -> Bool {
+        if isTestingDelays {
+            return true
+        }
+        return testingGroupTag == group.tag
+    }
+
+    public var visibleStrategyGroups: [StrategyGroup] {
+        let filtered = strategyGroups.filter { group in
+            if isHiddenProxyAlias(group) {
+                return false
+            }
+            if group.tag == "auto" && group.type == "urltest" {
+                let parents = strategyGroups.filter { $0.type == "selector" && $0.members.contains("auto") }
+                if parents.contains(where: { !isHiddenProxyAlias($0) }) {
+                    return false
+                }
+            }
+            return true
+        }
+        if !filtered.isEmpty {
+            return filtered
+        }
+        let nodeTags = nodes.compactMap { node -> String? in
+            if node.disabled || node.tag == "auto" || node.tag == "direct" { return nil }
+            return node.tag
+        }
+        if nodeTags.isEmpty {
+            return []
+        }
+        var members = ["direct"]
+        members.append(contentsOf: nodeTags)
+        return [
+            StrategyGroup(
+                tag: "proxy",
+                name: "节点选择",
+                type: "selector",
+                now: status.selected,
+                members: members,
+                leafTags: nodeTags
+            )
+        ]
+    }
+
+    private func isHiddenProxyAlias(_ group: StrategyGroup) -> Bool {
+        guard group.tag == "proxy" || group.name == "proxy" else { return false }
+        guard group.members.count == 1 else { return false }
+        let target = group.members[0]
+        return strategyGroups.contains(where: { $0.tag == target })
     }
 
     public func isNodeSpeedTesting(_ tag: String) -> Bool {
@@ -74,6 +126,49 @@ public class AsterState: ObservableObject {
             ?? nodes.first(where: { $0.id == tag })
             ?? nodes.first(where: { $0.name == tag })
             ?? nodes.first(where: { tag.hasSuffix($0.name) || $0.tag.hasSuffix(tag) || tag.contains($0.name) })
+    }
+
+    public func group(tagged tag: String) -> StrategyGroup? {
+        visibleStrategyGroups.first(where: { $0.tag == tag }) ?? strategyGroups.first(where: { $0.tag == tag })
+    }
+
+    public func autoWinnerName() -> String? {
+        guard let autoGroup = strategyGroups.first(where: { $0.tag == "auto" }),
+              let now = autoGroup.now, !now.isEmpty else {
+            return nil
+        }
+        return findNode(for: now)?.name ?? now
+    }
+
+    public func memberTitle(for tag: String) -> String {
+        StrategyPresentation.memberTitle(tag: tag, node: findNode(for: tag), autoWinner: autoWinnerName())
+    }
+
+    public func selectedTag(in group: StrategyGroup) -> String {
+        StrategyPresentation.selectedTag(in: group, fallbackSelected: status.selected)
+    }
+
+    public func selectedLabel(in group: StrategyGroup) -> String {
+        let tag = selectedTag(in: group)
+        return StrategyPresentation.selectedLabel(tag: tag, node: findNode(for: tag), autoWinner: autoWinnerName())
+    }
+
+    public func canSelectMember(group: StrategyGroup, tag: String) -> Bool {
+        StrategyPresentation.canSelect(group: group, tag: tag)
+    }
+
+    public func isMemberSelected(group: StrategyGroup, tag: String) -> Bool {
+        StrategyPresentation.isSelected(group: group, tag: tag, fallbackSelected: status.selected)
+    }
+
+    public func memberDelay(for tag: String) -> Int {
+        let autoDelay = strategyGroups.first(where: { $0.tag == "auto" })?.delayMs ?? 0
+        return StrategyPresentation.memberDelay(
+            tag: tag,
+            node: findNode(for: tag),
+            autoDelay: autoDelay,
+            statusDelay: status.delayMs
+        )
     }
 
     // 出口与本机双 IP 信息
@@ -279,7 +374,9 @@ public class AsterState: ObservableObject {
     }
 
     private func waitForControlPlane() async {
-        if !(await pingDaemon()) {
+        if !UnixDaemonTransport.socketAvailable() {
+            launchDaemonProcess()
+        } else if !(await pingDaemon()) {
             launchDaemonProcess()
         }
         for _ in 0..<40 {
@@ -409,7 +506,9 @@ public class AsterState: ObservableObject {
     private func pingDaemon() async -> Bool {
         guard let url = apiURL("/api/v1/status") else { return false }
         do {
-            let (_, response) = try await UnixDaemonTransport.request(URLRequest(url: url))
+            var req = URLRequest(url: url)
+            req.timeoutInterval = 1
+            let (_, response) = try await UnixDaemonTransport.request(req)
             if let http = response as? HTTPURLResponse, http.statusCode == 200 {
                 self.isConnected = true
                 return true
@@ -592,7 +691,8 @@ public class AsterState: ObservableObject {
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return }
             strategyGroups = try JSONDecoder().decode([StrategyGroup].self, from: data)
         } catch {
-            strategyGroups = []
+            // Keep the last successful snapshot. A missing socket or decode
+            // blip must not empty the 策略 tab.
         }
     }
 
@@ -601,23 +701,30 @@ public class AsterState: ObservableObject {
             actionError = "核心未运行，无法测速"
             return
         }
-        let tags = group.leafTags
+        let tags = group.leafTags.filter { tag in
+            tag != "direct" && tag != "block" && tag != "reject" && tag != "dns" && tag != group.tag
+        }
+        testingGroupTag = group.tag
         testingTags.formUnion(tags)
         AppDelegate.shared?.refreshStatusMenu()
         Task { @MainActor in
             defer {
+                if self.testingGroupTag == group.tag {
+                    self.testingGroupTag = nil
+                }
                 self.testingTags.subtract(tags)
                 AppDelegate.shared?.refreshStatusMenu()
             }
             guard let url = self.apiURL("/api/v1/strategy-groups/\(group.tag.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? group.tag)/delay") else { return }
-            let request = self.authorizedRequest(url: url, method: "POST")
+            var request = self.authorizedRequest(url: url, method: "POST")
+            request.timeoutInterval = 45.0
             do {
                 let (data, response) = try await self.apiData(for: request)
                 guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else { throw NSError(domain: "Aster", code: -1, userInfo: [NSLocalizedDescriptionKey: "策略组测速失败"]) }
                 if let results = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
                     for result in results {
                         guard let tag = result["tag"] as? String, let delay = result["delay"] as? Int else { continue }
-                        if let index = self.nodes.firstIndex(where: { $0.tag == tag || $0.id == tag || $0.name == tag || tag.hasSuffix($0.name) || $0.tag.hasSuffix(tag) }) {
+                        if let index = self.nodes.firstIndex(where: { $0.tag == tag || $0.id == tag || $0.name == tag }) {
                             self.nodes[index].delayMs = delay
                         }
                         if let gIdx = self.strategyGroups.firstIndex(where: { $0.tag == tag || $0.name == tag }) {
@@ -635,7 +742,9 @@ public class AsterState: ObservableObject {
     }
 
     public func selectStrategyGroupNode(group: StrategyGroup, tag: String) {
-        guard group.type == "selector", let encoded = group.tag.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed), let url = apiURL("/api/v1/strategy-groups/\(encoded)/select") else { return }
+        guard canSelectMember(group: group, tag: tag),
+              let encoded = group.tag.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let url = apiURL("/api/v1/strategy-groups/\(encoded)/select") else { return }
         // 乐观更新本地 strategyGroups 与 status，防止界面闪烁
         if let idx = self.strategyGroups.firstIndex(where: { $0.tag == group.tag }) {
             self.strategyGroups[idx].now = tag
@@ -652,8 +761,8 @@ public class AsterState: ObservableObject {
             } else if let n = self.findNode(for: tag) {
                 self.status.selectedLabel = n.name
             }
-            AppDelegate.shared?.refreshStatusMenu()
         }
+        AppDelegate.shared?.refreshStatusMenu()
         Task { @MainActor in
             var request = self.authorizedRequest(url: url, method: "POST")
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -1270,7 +1379,7 @@ public class AsterState: ObservableObject {
     private func relaunchAfterConfigurationRestore() {
         notify(message: "配置已恢复，Aster 正在重新启动…", type: .success)
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
-            self?.relaunchApplication()
+            self?.relaunchApplication(restartDaemon: true)
         }
     }
 
@@ -1288,27 +1397,16 @@ public class AsterState: ObservableObject {
     }
 
     // MARK: - 重启整个 Aster 应用程序
-    public func relaunchApplication() {
+    public func relaunchApplication(restartDaemon: Bool = false) {
         triggerHaptic()
         let appBundleURL = Bundle.main.bundleURL
+        AppDelegate.shared?.isRelaunching = true
 
-        // 1. 优先安全停止当前后台 daemon
-        let dataDirectory: URL
-        if let override = ProcessInfo.processInfo.environment["ASTER_DATA_DIR"], !override.isEmpty {
-            dataDirectory = URL(fileURLWithPath: override, isDirectory: true)
-        } else {
-            dataDirectory = FileManager.default.homeDirectoryForCurrentUser
-                .appending(path: "Library/Application Support/Aster", directoryHint: .isDirectory)
-        }
-        let pidURL = dataDirectory.appending(path: "daemon.pid")
-        if let rawPID = try? String(contentsOf: pidURL, encoding: .utf8),
-           let pid = Int32(rawPID.trimmingCharacters(in: .whitespacesAndNewlines)),
-           pid > 0 {
-            _ = Darwin.kill(pid, SIGTERM)
+        if restartDaemon {
+            stopOwnedDaemonAndWait()
         }
 
-        // 2. 通过后台独立进程延迟 300ms 唤起新 App，保证端口完全解绑
-        let script = "sleep 0.35; open -n \"\(appBundleURL.path)\""
+        let script = "sleep 0.15; open -n \"\(appBundleURL.path)\""
         let restartProc = Process()
         restartProc.executableURL = URL(fileURLWithPath: "/bin/sh")
         restartProc.arguments = ["-c", script]
@@ -1316,6 +1414,32 @@ public class AsterState: ObservableObject {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             NSApp.terminate(nil)
+        }
+    }
+
+    private func daemonDataDirectory() -> URL {
+        if let override = ProcessInfo.processInfo.environment["ASTER_DATA_DIR"], !override.isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appending(path: "Library/Application Support/Aster", directoryHint: .isDirectory)
+    }
+
+    private func stopOwnedDaemonAndWait() {
+        let pidURL = daemonDataDirectory().appending(path: "daemon.pid")
+        guard let rawPID = try? String(contentsOf: pidURL, encoding: .utf8),
+              let pid = Int32(rawPID.trimmingCharacters(in: .whitespacesAndNewlines)),
+              pid > 0 else {
+            return
+        }
+        _ = Darwin.kill(pid, SIGTERM)
+        let deadline = Date().addingTimeInterval(3)
+        while Date() < deadline && Darwin.kill(pid, 0) == 0 {
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+        let sock = UnixDaemonTransport.socketPath
+        while Date() < deadline && FileManager.default.fileExists(atPath: sock) {
+            Thread.sleep(forTimeInterval: 0.05)
         }
     }
 
@@ -1443,6 +1567,7 @@ public class AsterState: ObservableObject {
             }
             await self.fetchConfigs()
             await self.fetchNodes()
+            await self.fetchStrategyGroups()
             await self.fetchStatus()
             self.isConfigMutationInFlight = false
             completion?(isSuccess, errorMsg)
@@ -1463,6 +1588,7 @@ public class AsterState: ObservableObject {
         }
         await fetchConfigs()
         await fetchNodes()
+        await fetchStrategyGroups()
     }
 
     public func fetchScripts() async {

@@ -333,7 +333,7 @@ func (a *App) SetProfileScript(id, source string) error {
 			if err != nil {
 				return err
 			}
-			candidate.Selected = "auto"
+			candidate.Selected = ""
 			for _, node := range render.Merge(effective) {
 				if node.NodeID == previousID && !node.Disabled {
 					candidate.Selected = node.Tag

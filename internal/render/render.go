@@ -134,32 +134,12 @@ func Config(f state.File, dir string) ([]byte, error) {
 
 	var outbounds []any
 	outbounds = append(outbounds, map[string]any{"type": "direct", "tag": "direct"})
-	proxyList := append([]string{"auto"}, tags...)
-	if len(tags) == 0 {
-		proxyList = []string{"direct"}
-	}
+	proxyList := proxyMembers(tags)
 	outbounds = append(outbounds, map[string]any{
 		"type":                        "selector",
 		"tag":                         "proxy",
 		"outbounds":                   proxyList,
 		"default":                     defaultSelect(f.Selected, proxyList),
-		"interrupt_exist_connections": false,
-	})
-	urltestOut := tags
-	if len(urltestOut) == 0 {
-		urltestOut = []string{"direct"}
-	}
-	testURL := f.Settings.DelayURL
-	if testURL == "" {
-		testURL = "https://www.gstatic.com/generate_204"
-	}
-	outbounds = append(outbounds, map[string]any{
-		"type":                        "urltest",
-		"tag":                         "auto",
-		"outbounds":                   urltestOut,
-		"url":                         testURL,
-		"interval":                    "3m",
-		"tolerance":                   50,
 		"interrupt_exist_connections": false,
 	})
 	nodeServersMap := make(map[string]struct{})
@@ -270,6 +250,7 @@ func Config(f state.File, dir string) ([]byte, error) {
 			},
 		},
 	}
+	applySelectorDefaults(cfg, f.Selected, f.SelectorNow)
 	baseJSON, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return nil, err
@@ -354,6 +335,8 @@ func Config(f state.File, dir string) ([]byte, error) {
 					}
 					finalMap["outbounds"] = append(outboundsList, proxySelector)
 				}
+
+				applySelectorDefaults(finalMap, f.Selected, f.SelectorNow)
 
 				// 4. 确保 route 中基础 DNS 劫持与必要 rule_set 完备
 				routeMap, _ := finalMap["route"].(map[string]any)
@@ -692,13 +675,79 @@ func clashMode(mode string) string {
 	}
 }
 
+func proxyMembers(tags []string) []string {
+	out := []string{"direct"}
+	seen := map[string]bool{"direct": true}
+	for _, tag := range tags {
+		if tag == "" || seen[tag] {
+			continue
+		}
+		seen[tag] = true
+		out = append(out, tag)
+	}
+	return out
+}
+
 func defaultSelect(sel string, list []string) string {
 	for _, t := range list {
 		if t == sel {
 			return sel
 		}
 	}
-	return list[0]
+	for _, t := range list {
+		if t != "direct" && t != "block" && t != "reject" && t != "dns" {
+			return t
+		}
+	}
+	if len(list) > 0 {
+		return list[0]
+	}
+	return "direct"
+}
+
+func applySelectorDefaults(cfg map[string]any, selected string, byGroup map[string]string) {
+	outbounds, ok := cfg["outbounds"].([]any)
+	if !ok {
+		return
+	}
+	for _, raw := range outbounds {
+		outbound, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if typ, _ := outbound["type"].(string); typ != "selector" {
+			continue
+		}
+		tag, _ := outbound["tag"].(string)
+		members := stringList(outbound["outbounds"])
+		want := ""
+		if byGroup != nil {
+			want = byGroup[tag]
+		}
+		if tag == "proxy" && selected != "" {
+			want = selected
+		}
+		if def := defaultSelect(want, members); def != "" {
+			outbound["default"] = def
+		}
+	}
+}
+
+func stringList(v any) []string {
+	switch typed := v.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if s, ok := item.(string); ok && s != "" {
+				out = append(out, s)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func setTag(raw json.RawMessage, tag string) json.RawMessage {

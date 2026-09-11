@@ -8,6 +8,8 @@ public struct SettingsView: View {
     @AppStorage("sortNodesByDelay") private var sortNodesByDelay: Bool = false
     @AppStorage("showConnectionQuickRule") private var showConnectionQuickRule: Bool = true
     @AppStorage("minimizeOnLaunch") private var minimizeOnLaunch: Bool = false
+    @AppStorage("showStatusBarSpeed") private var showStatusBarSpeed: Bool = true
+    @AppStorage("keepDockWhenWindowClosed") private var keepDockWhenWindowClosed: Bool = false
     // WebDAV 持久化配置
     @AppStorage("webdavServerURL") private var webdavServerURL: String = ""
     @AppStorage("webdavUsername") private var webdavUsername: String = ""
@@ -191,6 +193,22 @@ public struct SettingsView: View {
                         title: "启动时隐藏主窗口",
                         subtitle: "启动时不弹出大窗口，仅在菜单栏保持就绪",
                         isOn: $minimizeOnLaunch
+                    )
+
+                    Divider()
+
+                    settingSwitchRow(
+                        title: "菜单栏显示实时网速",
+                        subtitle: "在图标右侧显示上下行速率；关闭后菜单栏只保留图标",
+                        isOn: $showStatusBarSpeed
+                    )
+
+                    Divider()
+
+                    settingSwitchRow(
+                        title: "关闭窗口后保留 Dock 图标",
+                        subtitle: "开启后关闭主窗口仍留在 Dock；关闭则仅通过菜单栏访问",
+                        isOn: $keepDockWhenWindowClosed
                     )
 
                 }
@@ -768,6 +786,19 @@ public struct SettingsView: View {
     // MARK: - 5. 关于与系统 Tab
     private var aboutTabContent: some View {
         VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 12) {
+                AsterBrandMark(size: 48)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Aster")
+                        .font(.system(size: 16, weight: .bold))
+                    Text("Native sing-box client")
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+            }
+            .settingsCardStyle()
+
             // 内核状态
             VStack(alignment: .leading, spacing: 10) {
                 Label("底层内核引擎", systemImage: "cpu.fill")

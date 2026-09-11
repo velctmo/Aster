@@ -172,7 +172,7 @@ private struct ScriptListRow: View {
             }
 
             HStack {
-                Text(script.kind == "nodes" ? "节点清洗" : "完整配置与策略组")
+                Text(script.kind == "nodes" ? "节点清洗与策略组" : "完整配置与策略组")
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
                 Spacer()
@@ -260,7 +260,7 @@ public struct ScriptDetailEditorView: View {
                         .textFieldStyle(.plain)
 
                     HStack(spacing: 8) {
-                        Text(script.kind == "nodes" ? "模式: 节点清洗" : "模式: 完整配置 (支持生成策略组与分流规则)")
+                        Text(script.kind == "nodes" ? "模式: 节点清洗与策略组（transformNodes / main）" : "模式: 完整配置与策略组（main）")
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                     }
@@ -281,6 +281,17 @@ public struct ScriptDetailEditorView: View {
                     Text(saveSuccessMessage)
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(.green)
+                }
+
+                if editMode == .code {
+                    Button {
+                        applyTemplate(ScriptTemplates.subStoreGroups)
+                    } label: {
+                        Text("载入地区分组示例")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("在节点池主组上叠加自动选择与地区 urltest，类似 Sub-Store")
                 }
 
                 Button {
@@ -470,7 +481,7 @@ public struct ScriptDetailEditorView: View {
                                     Picker("", selection: $rule.targetOutbound) {
                                         Text("直连 (direct)").tag("direct")
                                         Text("阻止 (reject)").tag("reject")
-                                        Text("节点选择").tag("节点选择")
+                                        Text("节点选择 (proxy)").tag("proxy")
                                         ForEach(customGroups) { g in
                                             if !g.name.isEmpty {
                                                 Text(g.name).tag(g.name)
@@ -562,44 +573,41 @@ public struct ScriptDetailEditorView: View {
 /**
  * 由 Aster 表单构建器生成的覆写脚本
  * 生成时间: \(Date().formatted(date: .abbreviated, time: .shortened))
+ *
+ * 节点池已提供 tag 为 proxy 的主选择组。脚本只追加策略组并写回 proxy.outbounds。
  */
 
 function main(config) {
-  // 1. 提取有效节点 tag 列表
+  const reserved = new Set(['direct', 'proxy', 'auto', 'reject', 'block', 'dns']);
   const allNodeTags = (config.outbounds || [])
-    .filter(o => o && o.tag && !['direct', 'proxy', 'auto', 'reject'].includes(o.tag))
+    .filter(o => o && o.tag && !reserved.has(o.tag) && !['selector', 'urltest', 'fallback'].includes(o.type))
     .map(o => o.tag);
 
   if (!allNodeTags.length) return config;
 
-  // 2. 基础出站与主策略组
-  const groups = [
-    { type: 'direct', tag: 'direct' },
-    { type: 'block', tag: 'reject' },
-    { type: 'selector', tag: '节点选择', outbounds: allNodeTags },
-    { type: 'urltest', tag: '自动优选', outbounds: allNodeTags, url: 'https://www.gstatic.com/generate_204', tolerance: 50 }
+  const extraGroups = [
+    { type: 'urltest', tag: '自动选择', outbounds: allNodeTags, url: 'https://www.gstatic.com/generate_204', interval: '3m', tolerance: 50 }
   ];
 
 """
 
         if enableAutoHK {
-            code += "  const hkNodes = allNodeTags.filter(t => /香港|HK|Hong\\s*Kong/i.test(t));\n"
-            code += "  if (hkNodes.length) groups.push({ type: 'urltest', tag: '自动选择-香港', outbounds: hkNodes, url: 'https://www.gstatic.com/generate_204' });\n"
+            code += "  const hkNodes = allNodeTags.filter(t => /香港|HK|Hong\\s*Kong|🇭🇰/i.test(t));\n"
+            code += "  if (hkNodes.length) extraGroups.push({ type: 'urltest', tag: '香港', outbounds: hkNodes, url: 'https://www.gstatic.com/generate_204', interval: '3m', tolerance: 50 });\n"
         }
         if enableAutoJP {
-            code += "  const jpNodes = allNodeTags.filter(t => /日本|JP|Japan|东京/i.test(t));\n"
-            code += "  if (jpNodes.length) groups.push({ type: 'urltest', tag: '自动选择-日本', outbounds: jpNodes, url: 'https://www.gstatic.com/generate_204' });\n"
+            code += "  const jpNodes = allNodeTags.filter(t => /日本|JP|Japan|东京|🇯🇵/i.test(t));\n"
+            code += "  if (jpNodes.length) extraGroups.push({ type: 'urltest', tag: '日本', outbounds: jpNodes, url: 'https://www.gstatic.com/generate_204', interval: '3m', tolerance: 50 });\n"
         }
         if enableAutoUS {
-            code += "  const usNodes = allNodeTags.filter(t => /美国|US|United\\s*States/i.test(t));\n"
-            code += "  if (usNodes.length) groups.push({ type: 'urltest', tag: '自动选择-美国', outbounds: usNodes, url: 'https://www.gstatic.com/generate_204' });\n"
+            code += "  const usNodes = allNodeTags.filter(t => /美国|美國|US|United\\s*States|🇺🇸/i.test(t));\n"
+            code += "  if (usNodes.length) extraGroups.push({ type: 'urltest', tag: '美国', outbounds: usNodes, url: 'https://www.gstatic.com/generate_204', interval: '3m', tolerance: 50 });\n"
         }
         if enableAutoSG {
-            code += "  const sgNodes = allNodeTags.filter(t => /新加坡|SG|Singapore/i.test(t));\n"
-            code += "  if (sgNodes.length) groups.push({ type: 'urltest', tag: '自动选择-新加坡', outbounds: sgNodes, url: 'https://www.gstatic.com/generate_204' });\n"
+            code += "  const sgNodes = allNodeTags.filter(t => /新加坡|SG|Singapore|🇸🇬/i.test(t));\n"
+            code += "  if (sgNodes.length) extraGroups.push({ type: 'urltest', tag: '新加坡', outbounds: sgNodes, url: 'https://www.gstatic.com/generate_204', interval: '3m', tolerance: 50 });\n"
         }
 
-        // 动态自定义策略组
         for (i, g) in customGroups.enumerated() {
             guard !g.name.isEmpty else { continue }
             let varName = "customGroupNodes_\(i)"
@@ -610,21 +618,27 @@ function main(config) {
                 code += "  const \(varName) = allNodeTags.filter(t => new RegExp('\(kw)', 'i').test(t));\n"
             }
             if g.type == "urltest" {
-                code += "  groups.push({ type: 'urltest', tag: '\(g.name)', outbounds: \(varName).length ? \(varName) : allNodeTags, url: 'https://www.gstatic.com/generate_204', tolerance: 50 });\n"
+                code += "  extraGroups.push({ type: 'urltest', tag: '\(g.name)', outbounds: \(varName).length ? \(varName) : allNodeTags, url: 'https://www.gstatic.com/generate_204', interval: '3m', tolerance: 50 });\n"
             } else {
-                code += "  groups.push({ type: 'selector', tag: '\(g.name)', outbounds: \(varName).length ? \(varName) : allNodeTags });\n"
+                code += "  extraGroups.push({ type: 'selector', tag: '\(g.name)', outbounds: \(varName).length ? \(varName) : allNodeTags });\n"
             }
         }
 
         code += """
 
-  // 3. 组装出站列表
-  const nodeOutbounds = config.outbounds.filter(o => allNodeTags.includes(o.tag));
-  config.outbounds = [...groups, ...nodeOutbounds];
+  const extraTags = extraGroups.map(g => g.tag);
+  config.outbounds = (config.outbounds || []).filter(o => !extraTags.includes(o.tag));
+  const proxy = config.outbounds.find(o => o.tag === 'proxy');
+  if (proxy) {
+    proxy.outbounds = extraTags;
+    proxy.default = extraTags[0];
+  }
+  const proxyIdx = Math.max(0, config.outbounds.findIndex(o => o.tag === 'proxy'));
+  config.outbounds.splice(proxyIdx + 1, 0, ...extraGroups);
 
-  // 4. 动态分流规则注入
   config.route = config.route || {};
   config.route.rules = config.route.rules || [];
+  config.route.final = 'proxy';
 
   const generatedRules = [];
 """
@@ -640,8 +654,6 @@ function main(config) {
 
         code += """
   config.route.rules = [...generatedRules, ...config.route.rules];
-  config.route.final = '节点选择';
-
   return config;
 }
 """
@@ -769,12 +781,58 @@ public enum ScriptTemplates {
  * Aster 覆写脚本
  * 
  * 约定入口: main(config)
+ * 节点池已生成 tag 为 proxy 的主选择组，可在此追加 urltest / 地区组并写回 proxy.outbounds。
  * @param {Object} config - 传入的 sing-box 完整配置对象
  * @returns {Object} 处理后的 sing-box 配置对象
  */
 function main(config) {
   // 可以在此处自由调整 config.outbounds 与 config.route
   // 也可以通过上方切换到「表单构建器」可视化添加策略组和分流规则一键生成
+  return config;
+}
+"""
+
+    public static let subStoreGroups = """
+/**
+ * Sub-Store 风格：在节点池主组上叠加自动选择与地区 urltest。
+ * 入口: main(config)
+ */
+function main(config) {
+  const reserved = new Set(['direct', 'proxy', 'auto', 'reject', 'block', 'dns']);
+  const allNodeTags = (config.outbounds || [])
+    .filter(o => o && o.tag && !reserved.has(o.tag) && !['selector', 'urltest', 'fallback'].includes(o.type))
+    .map(o => o.tag);
+  if (!allNodeTags.length) return config;
+
+  const regions = [
+    { tag: '香港', re: /香港|HK|Hong\\s*Kong|🇭🇰/i },
+    { tag: '日本', re: /日本|JP|Japan|东京|🇯🇵/i },
+    { tag: '台湾', re: /台湾|台灣|TW|Taiwan|🇹🇼/i },
+    { tag: '新加坡', re: /新加坡|SG|Singapore|🇸🇬/i },
+    { tag: '美国', re: /美国|美國|US|United\\s*States|🇺🇸/i }
+  ];
+
+  const extra = [{
+    type: 'urltest', tag: '自动选择', outbounds: allNodeTags,
+    url: 'https://www.gstatic.com/generate_204', interval: '3m', tolerance: 50
+  }];
+  for (const region of regions) {
+    const tags = allNodeTags.filter(t => region.re.test(t));
+    if (tags.length) extra.push({
+      type: 'urltest', tag: region.tag, outbounds: tags,
+      url: 'https://www.gstatic.com/generate_204', interval: '3m', tolerance: 50
+    });
+  }
+
+  const extraTags = extra.map(g => g.tag);
+  config.outbounds = config.outbounds.filter(o => !extraTags.includes(o.tag));
+  const proxy = config.outbounds.find(o => o.tag === 'proxy');
+  if (proxy) {
+    proxy.outbounds = extraTags;
+    proxy.default = extraTags[0];
+  }
+  const idx = config.outbounds.findIndex(o => o.tag === 'proxy');
+  config.outbounds.splice(idx + 1, 0, ...extra);
   return config;
 }
 """

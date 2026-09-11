@@ -23,7 +23,12 @@ enum UnixDaemonTransport {
         return home.appendingPathComponent("Library/Application Support/Aster/daemon.sock").path
     }
 
+    static func socketAvailable() -> Bool {
+        FileManager.default.fileExists(atPath: socketPath)
+    }
+
     static func request(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        guard socketAvailable() else { throw URLError(.cannotConnectToHost) }
         let timeout = request.timeoutInterval > 0 ? request.timeoutInterval : 30
         return try await withThrowingTaskGroup(of: (Data, URLResponse).self) { group in
             group.addTask {
@@ -66,6 +71,12 @@ enum UnixDaemonTransport {
                 case .cancelled:
                     conn.stateUpdateHandler = nil
                     gate.resume { cont.resume(throwing: URLError(.cancelled)) }
+                case .waiting(let err):
+                    if case .posix(.ENOENT) = err {
+                        conn.stateUpdateHandler = nil
+                        conn.cancel()
+                        gate.resume { cont.resume(throwing: err) }
+                    }
                 default:
                     break
                 }

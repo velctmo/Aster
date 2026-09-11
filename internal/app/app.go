@@ -17,6 +17,7 @@ import (
 	"aster/internal/core"
 	"aster/internal/logstore"
 	"aster/internal/macos"
+	"aster/internal/pidfile"
 	"aster/internal/render"
 	"aster/internal/state"
 )
@@ -185,11 +186,23 @@ func (a *App) APIToken() string {
 }
 
 func (a *App) WriteDaemonPID() error {
-	return os.WriteFile(a.st.DaemonPIDPath(), []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600)
+	return pidfile.Write(a.st.DaemonPIDPath(), os.Getpid())
+}
+
+func (a *App) ReadDaemonPID() int {
+	return pidfile.Read(a.st.DaemonPIDPath())
+}
+
+func (a *App) OwnsDaemonPID() bool {
+	return pidfile.Owns(a.st.DaemonPIDPath(), os.Getpid())
 }
 
 func (a *App) ClearDaemonPID() {
 	_ = os.Remove(a.st.DaemonPIDPath())
+}
+
+func (a *App) ClearDaemonPIDIfOwner() {
+	pidfile.RemoveIfOwner(a.st.DaemonPIDPath(), os.Getpid())
 }
 
 func (a *App) Store() *state.Store { return a.st }
@@ -245,7 +258,7 @@ func (a *App) Shutdown() {
 	_ = a.disableSystemProxy(f)
 	_ = a.core.Stop()
 	_ = a.logs.Close()
-	a.ClearDaemonPID()
+	a.ClearDaemonPIDIfOwner()
 }
 
 func (a *App) waitBackground() { a.bgWG.Wait() }
@@ -639,8 +652,14 @@ func (a *App) apply(f state.File, restart bool) error {
 			for time.Now().Before(deadline) {
 				if a.clash.Healthy() {
 					_ = a.clash.PatchMode(clashMode(f.Mode))
-					if f.Selected != "" {
-						_ = a.clash.Select("proxy", f.Selected)
+					if tag := a.selectableProxyMember(f.Selected); tag != "" {
+						_ = a.clash.Select("proxy", tag)
+					}
+					for groupTag, nodeTag := range f.SelectorNow {
+						if groupTag == "" || nodeTag == "" || groupTag == "proxy" {
+							continue
+						}
+						_ = a.clash.Select(groupTag, nodeTag)
 					}
 					healthy = true
 					break

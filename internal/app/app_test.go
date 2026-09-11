@@ -36,7 +36,46 @@ func TestControlSocketAndToken(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "daemon.pid")); !os.IsNotExist(err) {
 		t.Fatalf("pid should be removed: %v", err)
 	}
-	_ = time.Second
+}
+
+func TestClearDaemonPIDIfOwnerLeavesForeignProcess(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ASTER_DATA_DIR", dir)
+	a, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "daemon.pid")
+	if err := os.WriteFile(path, []byte("1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.ClearDaemonPIDIfOwner()
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("foreign pid file must survive: %v", err)
+	}
+	if err := a.WriteDaemonPID(); err != nil {
+		t.Fatal(err)
+	}
+	if !a.OwnsDaemonPID() {
+		t.Fatal("writer must own daemon.pid")
+	}
+	a.ClearDaemonPIDIfOwner()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("own pid file must be removed: %v", err)
+	}
+}
+
+func TestNodesOmitsSyntheticAutoWithoutOutbound(t *testing.T) {
+	t.Setenv("ASTER_DATA_DIR", t.TempDir())
+	a, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range a.Nodes() {
+		if n.Tag == "auto" {
+			t.Fatalf("synthetic auto must not appear without an auto outbound: %+v", n)
+		}
+	}
 }
 
 func TestAuthorizationFailureDoesNotAutoRestart(t *testing.T) {

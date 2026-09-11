@@ -27,9 +27,10 @@ type settingsDocument struct {
 	LogLevel         string   `json:"logLevel"`
 	NodeView         string   `json:"nodeView"`
 	Theme            string   `json:"theme"`
-	Mode             string   `json:"mode"`
-	Selected         string   `json:"selected"`
-	ActiveConfigID   string   `json:"activeConfigId"`
+	Mode             string            `json:"mode"`
+	Selected         string            `json:"selected"`
+	SelectorNow      map[string]string `json:"selectorNow,omitempty"`
+	ActiveConfigID   string            `json:"activeConfigId"`
 	ProfileIDs       []string `json:"profileIds"`
 	ScriptIDs        []string `json:"scriptIds"`
 }
@@ -245,7 +246,7 @@ func settingsDocumentFromFile(f File, profileIDs, scriptIDs []string) settingsDo
 		SubIntervalHours: f.Settings.SubIntervalHours,
 		LogRetention:     f.Settings.LogRetention, LogLevel: f.Settings.LogLevel,
 		NodeView: f.Settings.NodeView, Theme: f.Settings.Theme,
-		Mode: f.Mode, Selected: f.Selected, ActiveConfigID: f.ActiveConfigID,
+		Mode: f.Mode, Selected: f.Selected, SelectorNow: cloneStringMap(f.SelectorNow), ActiveConfigID: f.ActiveConfigID,
 		ProfileIDs: profileIDs, ScriptIDs: scriptIDs,
 	}
 }
@@ -276,6 +277,7 @@ func applySettingsDocument(f *File, doc settingsDocument) {
 	f.Settings.Theme = doc.Theme
 	f.Mode = doc.Mode
 	f.Selected = doc.Selected
+	f.SelectorNow = cloneStringMap(doc.SelectorNow)
 	f.ActiveConfigID = doc.ActiveConfigID
 }
 

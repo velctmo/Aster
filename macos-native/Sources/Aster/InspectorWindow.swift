@@ -39,6 +39,7 @@ public class InspectorWindowController: NSObject, NSWindowDelegate {
             self.window = win
         }
 
+        AppDelegate.shared?.prepareToShowWindow()
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
         AppDelegate.shared?.updateDockPolicy()

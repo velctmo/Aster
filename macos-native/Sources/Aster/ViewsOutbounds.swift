@@ -10,6 +10,7 @@ public struct OutboundsView: View {
     @State private var searchText = ""
     @State private var selectedSourceID = "all"
     @State private var expandedGroupTags: Set<String> = []
+    @State private var didAutoExpandGroups = false
 
     public enum NodeSortOption: String, CaseIterable {
         case defaultOrder = "默认顺序"
@@ -123,7 +124,7 @@ public struct OutboundsView: View {
             Button(action: {
                 // 点击全量测速时，自动展开所有包含叶子节点的策略组，让用户直接看到测速动态
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                    for g in state.strategyGroups {
+                    for g in state.visibleStrategyGroups {
                         expandedGroupTags.insert(g.tag)
                     }
                 }
@@ -242,48 +243,20 @@ public struct OutboundsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// 过滤后的用户可视策略组（隐藏底层仅作单跳别名的 proxy 兼容组以及内部 URLTest 测速池）
-    private var displayStrategyGroups: [StrategyGroup] {
-        state.strategyGroups.filter { group in
-            // 如果 tag 为 "proxy"，且仅有 1 个成员，并且该成员本身就是另一个策略组，则作为底层别名隐藏
-            if (group.tag == "proxy" || group.name == "proxy") && group.members.count == 1 {
-                let target = group.members[0]
-                if state.strategyGroups.contains(where: { $0.tag == target }) {
-                    return false
-                }
-            }
-            // 如果存在上层 selector 包含 auto，并且当前组 tag 为 "auto" (urltest)，则作为底层测速池隐藏，避免界面出现全置灰卡片
-            if group.tag == "auto" && group.type == "urltest" {
-                let hasSelectorParent = state.strategyGroups.contains(where: { $0.type == "selector" && $0.members.contains("auto") })
-                if hasSelectorParent {
-                    return false
-                }
-            }
-            return true
+    private func autoExpandGroupsIfNeeded() {
+        let groups = state.visibleStrategyGroups
+        guard !groups.isEmpty, !didAutoExpandGroups else { return }
+        for group in groups {
+            expandedGroupTags.insert(group.tag)
         }
-    }
-
-    /// 智能解析当前系统的主出站策略组 (如「🚀 节点选择」)
-    private var primaryOutboundGroup: StrategyGroup? {
-        let rawProxyGroup = state.strategyGroups.first(where: { $0.tag == "proxy" || $0.name == "proxy" })
-        if let p = rawProxyGroup, p.members.count == 1, let targetGroup = state.strategyGroups.first(where: { $0.tag == p.members[0] }) {
-            return targetGroup
-        }
-        if let selectorGroup = displayStrategyGroups.first(where: { $0.type == "selector" && ($0.tag.contains("选择") || $0.tag.contains("Proxy")) }) {
-            return selectorGroup
-        }
-        return displayStrategyGroups.first(where: { $0.type == "selector" }) ?? rawProxyGroup
+        didAutoExpandGroups = true
     }
 
     @ViewBuilder
     private var nodesGrid: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                // 1. 顶部 Hero 主代理出口看板卡片
-                primaryOutboundHeroCard
-
-                // 2. 策略组列表 (过滤内部包装层，保留用户定义的策略组完整排列)
-                ForEach(displayStrategyGroups) { group in
+                ForEach(state.visibleStrategyGroups) { group in
                     strategyGroupSection(group)
                 }
             }
@@ -292,174 +265,32 @@ public struct OutboundsView: View {
         .scrollIndicators(.hidden)
     }
 
-    /// 顶部主代理通道的高规格 Hero 状态卡片
-    @ViewBuilder
-    private var primaryOutboundHeroCard: some View {
-        let pGroup = primaryOutboundGroup
-        let activeTag = pGroup?.now ?? state.status.selected
-        let isAuto = (activeTag == "auto" || state.status.selected == "auto")
-        let activeNode = state.nodes.first(where: { $0.tag == activeTag })
-        let rawName: String = {
-            if isAuto {
-                if !state.status.selectedLabel.isEmpty { return state.status.selectedLabel }
-                if let autoGroup = state.strategyGroups.first(where: { $0.tag == "auto" }), let now = autoGroup.now, !now.isEmpty {
-                    let win = state.findNode(for: now)?.name ?? now
-                    return "自动选择 ➔ \(win)"
-                }
-                return "自动选择"
-            }
-            if let node = activeNode { return node.name }
-            if !state.status.selectedLabel.isEmpty { return state.status.selectedLabel }
-            return activeTag.isEmpty ? "未选择节点" : activeTag
-        }()
-        let cleanName = NodeNameSanitizer.clean(rawName)
-
-        HStack(alignment: .center, spacing: 16) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.blue.opacity(0.12))
-                    .frame(width: 44, height: 44)
-                Image(systemName: "globe.asia.australia.fill")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundColor(.blue)
-            }
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text("当前主代理出站")
-                        .font(.system(size: 14, weight: .bold))
-
-                    if let group = pGroup {
-                        Text(group.name)
-                            .font(.system(size: 10, weight: .bold, design: .rounded))
-                            .foregroundColor(.blue)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.blue.opacity(0.12))
-                            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-
-                        Text(group.type.uppercased())
-                            .font(.system(size: 9, weight: .bold, design: .monospaced))
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(Color.secondary.opacity(0.12))
-                            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                    }
-                }
-
-                HStack(spacing: 8) {
-                    Text(cleanName)
-                        .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-
-                    if isAuto {
-                        let autoDelay = state.strategyGroups.first(where: { $0.tag == "auto" })?.delayMs ?? state.status.delayMs
-                        if autoDelay > 0 {
-                            Text("\(autoDelay) ms")
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(autoDelay <= 150 ? .green : (autoDelay <= 500 ? .orange : .red))
-                        } else if state.isNodeTesting("auto") {
-                            Text("测速中…")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.blue)
-                        }
-                    } else if let node = activeNode {
-                        if node.delayMs > 0 {
-                            Text("\(node.delayMs) ms")
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(node.delayMs <= 150 ? .green : (node.delayMs <= 500 ? .orange : .red))
-                        } else if node.delayMs < 0 {
-                            Text("超时")
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(.red)
-                        }
-                    } else if let gDelay = pGroup?.delayMs, gDelay > 0 {
-                        Text("\(gDelay) ms")
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundColor(gDelay <= 150 ? .green : (gDelay <= 500 ? .orange : .red))
-                    } else if state.status.delayMs > 0 {
-                        Text("\(state.status.delayMs) ms")
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
-                            .foregroundColor(state.status.delayMs <= 150 ? .green : (state.status.delayMs <= 500 ? .orange : .red))
-                    }
-                }
-            }
-
-            Spacer()
-
-            if let targetGroup = pGroup {
-                let isGroupTesting = targetGroup.leafTags.contains { state.testingTags.contains($0) } || state.testingTags.contains(targetGroup.tag)
-                Button {
-                    expandedGroupTags.insert(targetGroup.tag)
-                    state.testStrategyGroup(targetGroup)
-                } label: {
-                    HStack(spacing: 4) {
-                        if isGroupTesting {
-                            ProgressView().controlSize(.mini).frame(width: 10, height: 10)
-                            Text("测速中…")
-                        } else {
-                            Image(systemName: "bolt.fill")
-                            Text("测速主出口")
-                        }
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
-                .disabled(!state.status.running || targetGroup.leafTags.isEmpty || isGroupTesting)
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(Color.primary.opacity(0.03))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.8)
-        )
-        .padding(.horizontal, DesignTokens.pagePadding)
-    }
 
     @ViewBuilder
     private func strategyGroupSection(_ group: StrategyGroup) -> some View {
-        let isGroupTesting = group.leafTags.contains { state.testingTags.contains($0) }
+        let isGroupTesting = state.isTestingGroup(group)
         let expanded = Binding(
             get: { expandedGroupTags.contains(group.tag) },
             set: { value in if value { expandedGroupTags.insert(group.tag) } else { expandedGroupTags.remove(group.tag) } }
         )
 
-        // 解析当前策略组选中的节点
-        let selectedTagInGroup = group.now ?? ((group.tag == "proxy" || group.tag == state.status.selected) ? state.status.selected : "")
-        let selectedNode = state.findNode(for: selectedTagInGroup)
-        let currentLabel: String = {
-            if selectedTagInGroup == "auto" {
-                if let autoGroup = state.strategyGroups.first(where: { $0.tag == "auto" }), let now = autoGroup.now, !now.isEmpty {
-                    let win = state.findNode(for: now)?.name ?? now
-                    return "自动 ➔ \(NodeNameSanitizer.clean(win))"
-                }
-                return "自动优选"
-            }
-            return NodeNameSanitizer.clean(selectedNode?.name ?? selectedTagInGroup)
-        }()
+        let currentLabel = state.selectedLabel(in: group)
 
         VStack(alignment: .leading, spacing: 0) {
             DisclosureGroup(isExpanded: expanded) {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 155, maximum: 230), spacing: 8)], spacing: 8) {
                     ForEach(group.members, id: \.self) { tag in
                         let node = state.findNode(for: tag)
-                        let isCurrentSelected = (tag == selectedTagInGroup)
                         GroupNodeCard(
                             tag: tag,
                             node: node,
-                            isSelector: group.type == "selector",
-                            isSelected: isCurrentSelected,
+                            isSelector: state.canSelectMember(group: group, tag: tag),
+                            isSelected: state.isMemberSelected(group: group, tag: tag),
                             isTesting: state.isNodeTesting(tag),
                             onSelect: {
-                                if group.type == "selector" {
-                                    state.selectStrategyGroupNode(group: group, tag: tag)
-                                }
-                            }
+                                state.selectStrategyGroupNode(group: group, tag: tag)
+                            },
+                            onTest: StrategyPresentation.canTest(tag: tag) ? { state.testNodeDelay(tag) } : nil
                         )
                     }
                 }
@@ -504,18 +335,7 @@ public struct OutboundsView: View {
 
                     Spacer()
 
-                    if isGroupTesting {
-                        HStack(spacing: 4) {
-                            ProgressView().controlSize(.mini).frame(width: 12, height: 12)
-                            Text("正在测速…")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.blue)
-                        }
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.blue.opacity(0.1))
-                        .cornerRadius(4)
-                    } else {
+                    if !isGroupTesting {
                         Text("\(group.leafTags.count) 节点").font(.caption).foregroundStyle(.secondary)
                     }
 
@@ -671,7 +491,7 @@ public struct OutboundsView: View {
 
             Divider().opacity(0.3)
 
-            if state.strategyGroups.isEmpty {
+            if state.visibleStrategyGroups.isEmpty {
                 emptyState
             } else {
                 nodesGrid
@@ -682,7 +502,18 @@ public struct OutboundsView: View {
             if sortNodesByDelay {
                 sortOption = .lowestDelay
             }
-			Task { await state.fetchStrategyGroups() }
+            autoExpandGroupsIfNeeded()
+            Task {
+                await state.fetchStrategyGroups()
+                autoExpandGroupsIfNeeded()
+            }
+        }
+        .onChange(of: state.strategyGroups.map(\.tag)) { _, _ in
+            autoExpandGroupsIfNeeded()
+        }
+        .onChange(of: state.status.activeConfigId) { _, _ in
+            didAutoExpandGroups = false
+            autoExpandGroupsIfNeeded()
         }
         .onChange(of: sortOption) { _, newVal in
             sortNodesByDelay = (newVal == .lowestDelay)
@@ -851,6 +682,7 @@ public struct GroupNodeCard: View {
     public var isSelected: Bool
     public var isTesting: Bool
     public var onSelect: () -> Void
+    public var onTest: (() -> Void)? = nil
 
     @State private var isHovered = false
 
@@ -859,24 +691,23 @@ public struct GroupNodeCard: View {
     }
 
     private var autoWinnerName: String? {
-        guard isAutoNode else { return nil }
-        if let autoGroup = AsterState.shared.strategyGroups.first(where: { $0.tag == "auto" }), let now = autoGroup.now, !now.isEmpty {
-            return AsterState.shared.findNode(for: now)?.name ?? now
-        }
-        return nil
+        AsterState.shared.autoWinnerName()
     }
 
     private var effectiveDelay: Int {
-        if isAutoNode {
-            let gDelay = AsterState.shared.strategyGroups.first(where: { $0.tag == "auto" })?.delayMs ?? 0
-            if gDelay > 0 { return gDelay }
-            return AsterState.shared.status.delayMs
-        }
-        return node?.delayMs ?? 0
+        AsterState.shared.memberDelay(for: tag)
     }
 
     private var accentColor: Color {
         isAutoNode ? Color.indigo : Color.blue
+    }
+
+    private var isBuiltinOutbound: Bool {
+        !StrategyPresentation.canTest(tag: tag)
+    }
+
+    private var cardTitle: String {
+        AsterState.shared.memberTitle(for: tag)
     }
 
     @ViewBuilder
@@ -889,6 +720,14 @@ public struct GroupNodeCard: View {
                     .padding(.vertical, 1.5)
                     .background(isSelected ? Color.indigo : Color.indigo.opacity(0.15))
                     .foregroundColor(isSelected ? .white : .indigo)
+                    .clipShape(Capsule())
+            } else if isBuiltinOutbound {
+                Text(tag == "direct" ? "直连" : "拦截")
+                    .font(.system(size: 8.5, weight: .bold))
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1.5)
+                    .background(isSelected ? Color.blue : Color.secondary.opacity(0.15))
+                    .foregroundColor(isSelected ? .white : .secondary)
                     .clipShape(Capsule())
             } else if let proto = node?.protocolName, !proto.isEmpty {
                 Text(proto.uppercased())
@@ -906,12 +745,20 @@ public struct GroupNodeCard: View {
 
     @ViewBuilder
     private var nameRow: some View {
-        let title = isAutoNode ? "♻️ 自动优选" : NodeNameSanitizer.clean(node?.name ?? tag)
-        Text(title)
-            .font(.system(size: 11.5, weight: isSelected ? .bold : .medium))
-            .foregroundColor(isSelected ? accentColor : .primary)
-            .lineLimit(1)
-            .truncationMode(.tail)
+        HStack(spacing: 6) {
+            Text(cardTitle)
+                .font(.system(size: 11.5, weight: isSelected ? .bold : .medium))
+                .foregroundColor(isSelected ? accentColor : .primary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+            if let onTest, StrategyPresentation.canTest(tag: tag), !isTesting {
+                Button("测试") { onTest() }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.blue)
+            }
+        }
     }
 
     @ViewBuilder

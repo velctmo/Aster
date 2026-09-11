@@ -38,6 +38,8 @@ func main() {
 		return
 	}
 
+	detachFromParentSession()
+
 	application, err := app.New()
 	if err != nil {
 		log.Fatalf("初始化 Aster 应用核心失败: %v", err)
@@ -50,6 +52,8 @@ func main() {
 		log.Printf("Aster 核心守护进程已在 %s 上健康运行，直接复用已有实例。", sock)
 		os.Exit(0)
 	}
+	detachFromParentSession()
+	replaceUnreachableDaemon(application.ReadDaemonPID(), sock)
 	_ = os.Remove(sock)
 	ln, err := net.Listen("unix", sock)
 	if err != nil {
@@ -82,10 +86,54 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
+	ownsSocket := application.OwnsDaemonPID()
 	_ = srv.Shutdown(ctx)
 	application.Shutdown()
-	_ = os.Remove(sock)
+	if ownsSocket {
+		_ = os.Remove(sock)
+	}
 	log.Println("Aster Core Daemon 已安全退出。")
+}
+
+func detachFromParentSession() {
+	if _, err := syscall.Setsid(); err != nil && !errors.Is(err, syscall.EPERM) {
+		log.Printf("脱离父进程会话失败: %v", err)
+	}
+	signal.Ignore(syscall.SIGHUP)
+}
+
+func replaceUnreachableDaemon(pid int, sock string) {
+	if pid <= 0 || pid == os.Getpid() || !processSignalable(pid) {
+		return
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return
+	}
+	log.Printf("控制面 %s 不可达，正在替换旧守护进程 pid=%d", sock, pid)
+	_ = proc.Signal(syscall.SIGTERM)
+	deadline := time.Now().Add(3 * time.Second)
+	for processSignalable(pid) && time.Now().Before(deadline) {
+		time.Sleep(50 * time.Millisecond)
+	}
+	if processSignalable(pid) {
+		_ = proc.Signal(syscall.SIGKILL)
+	}
+}
+
+func processSignalable(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = proc.Signal(syscall.Signal(0))
+	if err == nil {
+		return true
+	}
+	return errors.Is(err, syscall.EPERM)
 }
 
 func pingUnixStatus(path string) bool {

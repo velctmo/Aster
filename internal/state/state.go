@@ -128,6 +128,7 @@ type File struct {
 	Capture        Capture         `json:"capture"`
 	Mode           string          `json:"mode"`
 	Selected       string          `json:"selected"`
+	SelectorNow    map[string]string `json:"selectorNow,omitempty"`
 	ClashSecret    string          `json:"clashSecret"`
 	APIToken       string          `json:"apiToken"`
 	Rules          []Rule          `json:"rules"`
@@ -297,7 +298,7 @@ func DefaultFile() File {
 		Capture:     Capture{SystemProxy: false},
 		Wanted:      true,
 		Mode:        "rule",
-		Selected:    "auto",
+		Selected:    "",
 		ClashSecret: hex.EncodeToString(secret),
 		APIToken:    hex.EncodeToString(token),
 	}
@@ -351,9 +352,6 @@ func mergeDefaults(f File) File {
 	}
 	if f.Mode == "" {
 		f.Mode = "rule"
-	}
-	if f.Selected == "" {
-		f.Selected = "auto"
 	}
 	if f.ClashSecret == "" {
 		f.ClashSecret = d.ClashSecret
@@ -541,6 +539,18 @@ func clone(f File) File {
 		out.Profiles[i] = cloneProfile(profile)
 	}
 	out.Scripts = append([]ScriptItem(nil), f.Scripts...)
+	out.SelectorNow = cloneStringMap(f.SelectorNow)
+	return out
+}
+
+func cloneStringMap(src map[string]string) map[string]string {
+	if src == nil {
+		return nil
+	}
+	out := make(map[string]string, len(src))
+	for key, value := range src {
+		out[key] = value
+	}
 	return out
 }
 

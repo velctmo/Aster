@@ -48,37 +48,6 @@ public struct MainWindowView: View {
             HStack(spacing: 0) {
                 // 1. 左侧原生可折叠侧边栏
                 VStack(spacing: 0) {
-                    // 顶部品牌区 (留出 44px 空间自然避让 macOS 红绿灯)
-                    HStack(spacing: 10) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Color.blue.opacity(0.15))
-                                .frame(width: 32, height: 32)
-                            Image(systemName: "shield.fill")
-                                .font(.system(size: 16, weight: .bold))
-                                .foregroundColor(.blue)
-                        }
-
-                        if !isCollapsed && !compactSidebar {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Aster")
-                                    .font(.system(size: 14, weight: .bold))
-                                Text("Native sing-box Core")
-                                    .font(.system(size: 9, design: .monospaced))
-                                    .foregroundColor(.secondary)
-                            }
-                            Spacer()
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: (isCollapsed || compactSidebar) ? .center : .leading)
-                    .padding(.horizontal, (isCollapsed || compactSidebar) ? 0 : 16)
-                    .padding(.top, 44)
-                    .padding(.bottom, 16)
-
-                    Divider().opacity(0.4)
-                        .padding(.horizontal, (isCollapsed || compactSidebar) ? 8 : 12)
-                        .padding(.bottom, 8)
-
                     // 导航选项卡列表 (分组展示)
                     ScrollView {
                         VStack(alignment: .leading, spacing: 14) {
@@ -87,8 +56,9 @@ public struct MainWindowView: View {
                             sidebarSection(title: "管理", tabs: [.configuration, .settings], collapsed: isCollapsed || compactSidebar)
                         }
                         .padding(.horizontal, (isCollapsed || compactSidebar) ? 8 : 12)
-                        .padding(.top, 4)
+                        .padding(.top, 8)
                     }
+                    .padding(.top, 52)
                     .scrollIndicators(.hidden)
 
                     Spacer()

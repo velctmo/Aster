@@ -175,8 +175,35 @@ func TestSetProfileScriptKeepsSelectedNodeIdentity(t *testing.T) {
 		t.Fatalf("selected tag=%q", got)
 	}
 	nodes := a.Nodes()
-	if len(nodes) != 2 || nodes[1].Name != "优选 原始节点" {
+	if len(nodes) != 1 || nodes[0].Name != "优选 原始节点" {
 		t.Fatalf("effective app nodes=%+v", nodes)
+	}
+}
+
+func TestNodesIncludesAutoWhenScriptAddsIt(t *testing.T) {
+	t.Setenv("ASTER_DATA_DIR", t.TempDir())
+	a, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Store().Update(func(f *state.File) error {
+		f.Wanted = false
+		f.Profiles[0].ManualNodes = []state.Node{{
+			ID: "n", Name: "n1", Protocol: "vless", Outbound: json.RawMessage(`{"type":"vless","server":"x.com","server_port":443,"uuid":"u"}`),
+		}}
+		f.Profiles[0].Script = `function main(config) {
+  config.outbounds.push({type:'urltest', tag:'auto', outbounds:['n1'], url:'https://www.gstatic.com/generate_204'});
+  const proxy = config.outbounds.find(o => o.tag === 'proxy');
+  if (proxy) proxy.outbounds = ['auto', 'n1'];
+  return config;
+}`
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nodes := a.Nodes()
+	if len(nodes) < 1 || nodes[0].Tag != "auto" {
+		t.Fatalf("auto outbound should appear in nodes: %+v", nodes)
 	}
 }
 

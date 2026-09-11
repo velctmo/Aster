@@ -378,6 +378,13 @@ func (a *App) StrategyGroups() ([]render.Group, error) {
 	if err != nil {
 		return nil, err
 	}
+	for i := range groups {
+		if groups[i].Now == "" {
+			if saved := selectorSaved(f, groups[i].Tag); saved != "" {
+				groups[i].Now = saved
+			}
+		}
+	}
 	a.mu.Lock()
 	delays := make(map[string]int, len(a.delays))
 	for k, v := range a.delays {
@@ -414,25 +421,19 @@ func (a *App) DelayGroup(tag string) ([]map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
+	strategyTags := make(map[string]bool, len(groups))
 	for _, group := range groups {
-		if group.Tag == tag {
-			allTags := make([]string, 0, len(group.LeafTags)+len(group.Members)+1)
-			allTags = append(allTags, group.Tag)
-			seen := map[string]bool{group.Tag: true}
-			for _, m := range group.Members {
-				if !seen[m] {
-					seen[m] = true
-					allTags = append(allTags, m)
-				}
-			}
-			for _, lt := range group.LeafTags {
-				if !seen[lt] {
-					seen[lt] = true
-					allTags = append(allTags, lt)
-				}
-			}
-			return a.DelayMany(allTags), nil
+		strategyTags[group.Tag] = true
+	}
+	for _, group := range groups {
+		if group.Tag != tag {
+			continue
 		}
+		tags := render.ProbeTags(group, strategyTags)
+		if len(tags) == 0 {
+			return nil, fmt.Errorf("策略组没有可测速的节点")
+		}
+		return a.DelayMany(tags), nil
 	}
 	return nil, fmt.Errorf("策略组不存在: %s", tag)
 }
@@ -465,20 +466,24 @@ func (a *App) SelectGroupNode(groupTag, nodeTag string) error {
 		if err := a.clash.Select(groupTag, nodeTag); err != nil {
 			return err
 		}
-		// 持久化存储主策略组选择状态，确保重载/重启不回跳
-		if groupTag == "proxy" || len(groups) > 0 && groups[0].Tag == groupTag {
-			_, _ = a.st.Update(func(cur *state.File) error {
+		isMain := groupTag == "proxy" || (len(groups) > 0 && groups[0].Tag == groupTag)
+		_, _ = a.st.Update(func(cur *state.File) error {
+			if cur.SelectorNow == nil {
+				cur.SelectorNow = map[string]string{}
+			}
+			cur.SelectorNow[groupTag] = nodeTag
+			if isMain {
 				cur.Selected = nodeTag
 				if nodeTag != "auto" {
 					cur.RecentNodes = prepend(cur.RecentNodes, nodeTag, 8)
 				}
-				return nil
-			})
-			if nodeTag == "auto" {
-				go func() {
-					_, _ = a.Delay("auto")
-				}()
 			}
+			return nil
+		})
+		if isMain && nodeTag == "auto" {
+			go func() {
+				_, _ = a.Delay("auto")
+			}()
 		}
 		a.hub.Broadcast("status", a.Status())
 		if updatedGroups, gErr := a.StrategyGroups(); gErr == nil {
@@ -695,18 +700,22 @@ func (a *App) Status() StatusJSON {
 	}
 	running := a.core.Running()
 	if f.Selected == "auto" {
-		label = "自动选择"
-		if running {
-			if proxies, pErr := a.clash.Proxies(); pErr == nil && proxies != nil {
-				if autoP, ok := proxies["auto"]; ok && autoP.Now != "" {
-					winName := autoP.Now
-					for _, n := range nodes {
-						if n.Tag == autoP.Now || n.NodeID == autoP.Now {
-							winName = n.Name
-							break
+		if a.selectableProxyMember("auto") == "" {
+			label = "节点选择"
+		} else {
+			label = "自动选择"
+			if running {
+				if proxies, pErr := a.clash.Proxies(); pErr == nil && proxies != nil {
+					if autoP, ok := proxies["auto"]; ok && autoP.Now != "" {
+						winName := autoP.Now
+						for _, n := range nodes {
+							if n.Tag == autoP.Now || n.NodeID == autoP.Now {
+								winName = n.Name
+								break
+							}
 						}
+						label = fmt.Sprintf("自动选择 ➔ %s", winName)
 					}
-					label = fmt.Sprintf("自动选择 ➔ %s", winName)
 				}
 			}
 		}
@@ -888,6 +897,54 @@ func (a *App) activeMergedNodes(f state.File) ([]render.MergedNode, error) {
 	return nodes, nil
 }
 
+func (a *App) selectableProxyMember(tag string) string {
+	if tag == "" {
+		return ""
+	}
+	if tag == "direct" {
+		return tag
+	}
+	if groups, err := a.StrategyGroups(); err == nil {
+		for _, group := range groups {
+			if group.Tag == tag {
+				return tag
+			}
+			for _, member := range group.Members {
+				if member == tag {
+					return tag
+				}
+			}
+			for _, leaf := range group.LeafTags {
+				if leaf == tag {
+					return tag
+				}
+			}
+		}
+	}
+	nodes, err := a.activeMergedNodes(a.st.Active())
+	if err != nil {
+		return ""
+	}
+	for _, n := range nodes {
+		if n.Tag == tag || n.NodeID == tag {
+			return n.Tag
+		}
+	}
+	return ""
+}
+
+func selectorSaved(f state.File, tag string) string {
+	if f.SelectorNow != nil {
+		if saved := f.SelectorNow[tag]; saved != "" {
+			return saved
+		}
+	}
+	if tag == "proxy" {
+		return f.Selected
+	}
+	return ""
+}
+
 // effectiveNodesKey uses a durable profile revision rather than hashing every
 // node on a status poll. UpdatedAt intentionally remains second-granularity
 // for UI display, while Revision changes for every render-affecting mutation.
@@ -913,9 +970,17 @@ func (a *App) Nodes() []NodeJSON {
 		bandwidths[k] = v
 	}
 	a.mu.Unlock()
-	out := []NodeJSON{{
-		ID: "auto", Tag: "auto", Name: "自动选择", Protocol: "urltest", DelayMs: delays["auto"],
-	}}
+	out := []NodeJSON{}
+	if groups, err := a.StrategyGroups(); err == nil {
+		for _, group := range groups {
+			if group.Tag == "auto" {
+				out = append(out, NodeJSON{
+					ID: "auto", Tag: "auto", Name: "自动选择", Protocol: "urltest", DelayMs: delays["auto"],
+				})
+				break
+			}
+		}
+	}
 	nodes, err := a.activeMergedNodes(f)
 	if err != nil {
 		return nil

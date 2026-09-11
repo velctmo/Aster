@@ -521,9 +521,6 @@ func validatePortableBackup(backup portableBackup) error {
 	if backup.Version != portableBackupVersion {
 		return fmt.Errorf("不支持的便携备份版本: %d", backup.Version)
 	}
-	if strings.TrimSpace(backup.Selected) == "" {
-		return fmt.Errorf("备份没有选中的节点")
-	}
 	switch backup.Mode {
 	case "rule", "global", "direct":
 	default:

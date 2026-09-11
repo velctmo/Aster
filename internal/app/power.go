@@ -207,6 +207,10 @@ func (a *App) SelectNode(tag string) error {
 		}
 		if _, err := a.st.Update(func(cur *state.File) error {
 			cur.Selected = realTag
+			if cur.SelectorNow == nil {
+				cur.SelectorNow = map[string]string{}
+			}
+			cur.SelectorNow["proxy"] = realTag
 			cur.RecentNodes = prepend(cur.RecentNodes, realTag, 8)
 			return nil
 		}); err != nil {
@@ -218,9 +222,17 @@ func (a *App) SelectNode(tag string) error {
 	}
 	candidate := state.CloneFile(old)
 	candidate.Selected = realTag
+	if candidate.SelectorNow == nil {
+		candidate.SelectorNow = map[string]string{}
+	}
+	candidate.SelectorNow["proxy"] = realTag
 	candidate.RecentNodes = prepend(candidate.RecentNodes, realTag, 8)
 	return a.applyAndCommitCandidate(old, candidate, func(cur *state.File) {
 		cur.Selected = realTag
+		if cur.SelectorNow == nil {
+			cur.SelectorNow = map[string]string{}
+		}
+		cur.SelectorNow["proxy"] = realTag
 		cur.RecentNodes = prepend(cur.RecentNodes, realTag, 8)
 	})
 }

@@ -61,6 +61,17 @@ func TestDefaultFileDoesNotHijackSystemProxy(t *testing.T) {
 	}
 }
 
+func TestDefaultFileDoesNotSelectAuto(t *testing.T) {
+	f := DefaultFile()
+	if f.Selected == "auto" {
+		t.Fatal("fresh node pool must not default to auto")
+	}
+	merged := mergeDefaults(File{})
+	if merged.Selected == "auto" {
+		t.Fatal("empty selected must not be rewritten to auto")
+	}
+}
+
 func TestMergeDefaultsKeepsExistingMixedAndClashPorts(t *testing.T) {
 	f := mergeDefaults(File{Settings: Settings{MixedPort: 2080, ClashPort: 2090}})
 	if f.Settings.MixedPort != 2080 || f.Settings.ClashPort != 2090 {
