@@ -568,7 +568,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         }()
         let modeRootItem = NSMenuItem(title: "出站模式", action: nil, keyEquivalent: "")
         modeRootItem.identifier = NSUserInterfaceItemIdentifier("aster.outbound-mode")
-        modeRootItem.image = NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: "出站模式")
+        let modeImage = NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: "出站模式")
+        modeImage?.isTemplate = true
+        modeRootItem.image = modeImage
         
         let modeAttr = NSMutableAttributedString(string: "出站模式", attributes: [
             .font: NSFont.menuFont(ofSize: 0),
@@ -614,7 +616,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
             let selectedLabel = state.selectedLabel(in: group)
             let nowLabel = selectedLabel.isEmpty ? "" : "   [\(selectedLabel.truncated(toVisualWidth: 14))]"
             let strategyItem = NSMenuItem(title: group.name, action: nil, keyEquivalent: "")
-            // 彻底移除策略组生硬的系统方块图标，还原本色 Emoji 与纯净文本排版
+            let groupIcon: String = {
+                if group.tag == "proxy" || group.name.contains("节点选择") {
+                    return "slider.horizontal.3"
+                } else if group.tag == "auto" || group.name.contains("自动") {
+                    return "bolt.horizontal.circle.fill"
+                } else if group.name.contains("港") || group.name.contains("HK") || group.name.contains("台") || group.name.contains("美") || group.name.contains("日") || group.name.contains("韩") || group.name.contains("新加坡") {
+                    return "globe.asia.australia.fill"
+                } else {
+                    return "arrow.triangle.branch"
+                }
+            }()
+            let groupImage = NSImage(systemSymbolName: groupIcon, accessibilityDescription: group.name)
+            groupImage?.isTemplate = true
+            strategyItem.image = groupImage
 
             let titleAttr = NSMutableAttributedString(string: group.name, attributes: [
                 .font: NSFont.menuFont(ofSize: 0),
@@ -856,6 +871,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
                         ]))
                     }
                     item.attributedTitle = titleAttr
+                    if item.image == nil {
+                        let groupIcon: String = {
+                            if group.tag == "proxy" || group.name.contains("节点选择") {
+                                return "slider.horizontal.3"
+                            } else if group.tag == "auto" || group.name.contains("自动") {
+                                return "bolt.horizontal.circle.fill"
+                            } else if group.name.contains("港") || group.name.contains("HK") || group.name.contains("台") || group.name.contains("美") || group.name.contains("日") || group.name.contains("韩") || group.name.contains("新加坡") {
+                                return "globe.asia.australia.fill"
+                            } else {
+                                return "arrow.triangle.branch"
+                            }
+                        }()
+                        let groupImage = NSImage(systemSymbolName: groupIcon, accessibilityDescription: group.name)
+                        groupImage?.isTemplate = true
+                        item.image = groupImage
+                    }
                     updateStrategySubmenuItems(sub, group: group)
                 } else {
                     updateLiveMenuItems(in: sub)
@@ -1300,6 +1331,15 @@ final class StickyMenuItemView: NSView {
     private let titleLabel = NSTextField(labelWithString: "")
     private let accessoryLabel = NSTextField(labelWithString: "")
 
+    private var isSubmenuItem: Bool {
+        switch kind {
+        case .node, .mode, .config:
+            return true
+        case .action, .capture:
+            return false
+        }
+    }
+
     init(
         title: String,
         accessory: String = "",
@@ -1331,6 +1371,7 @@ final class StickyMenuItemView: NSView {
     private func setupUI() {
         checkView.imageScaling = .scaleProportionallyUpOrDown
         addSubview(checkView)
+        iconView.imageScaling = .scaleProportionallyUpOrDown
         addSubview(iconView)
         titleLabel.font = NSFont.menuFont(ofSize: 0)
         titleLabel.isEditable = false
@@ -1338,7 +1379,7 @@ final class StickyMenuItemView: NSView {
         titleLabel.drawsBackground = false
         titleLabel.lineBreakMode = .byTruncatingTail
         addSubview(titleLabel)
-        accessoryLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+        accessoryLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         accessoryLabel.alignment = .right
         accessoryLabel.isEditable = false
         accessoryLabel.isBordered = false
@@ -1352,21 +1393,87 @@ final class StickyMenuItemView: NSView {
             frame.size.width = sv.bounds.width
         }
         let height = bounds.height
-        checkView.frame = NSRect(x: 8, y: (height - 12) / 2, width: 12, height: 12)
-        iconView.frame = NSRect(x: 26, y: (height - 14) / 2, width: 14, height: 14)
-        let accessoryWidth: CGFloat = accessoryText.isEmpty ? 0 : 72
-        if accessoryWidth > 0 {
-            accessoryLabel.frame = NSRect(x: bounds.width - accessoryWidth - 10, y: 3, width: accessoryWidth, height: 18)
+
+        if isSubmenuItem {
+            // 二级子菜单节点项（带左侧勾选列）
+            checkView.isHidden = !checked
+            checkView.frame = NSRect(x: 8, y: (height - 12) / 2, width: 12, height: 12)
+
+            let hasIcon = iconView.image != nil
+            if hasIcon {
+                iconView.isHidden = false
+                iconView.frame = NSRect(x: 24, y: (height - 14) / 2, width: 14, height: 14)
+            } else {
+                iconView.isHidden = true
+                iconView.frame = .zero
+            }
+
+            let titleX: CGFloat = hasIcon ? 44 : 26
+
+            if !accessoryText.isEmpty {
+                accessoryLabel.isHidden = false
+                accessoryLabel.frame = NSRect(x: bounds.width - 74, y: 3, width: 64, height: 18)
+                titleLabel.frame = NSRect(
+                    x: titleX,
+                    y: 3,
+                    width: max(bounds.width - titleX - 74 - 4, 40),
+                    height: 18
+                )
+            } else {
+                accessoryLabel.isHidden = true
+                accessoryLabel.frame = .zero
+                titleLabel.frame = NSRect(
+                    x: titleX,
+                    y: 3,
+                    width: max(bounds.width - titleX - 14, 40),
+                    height: 18
+                )
+            }
         } else {
-            accessoryLabel.frame = .zero
+            // 主菜单项（无左侧勾选列）
+            // checkView: 隐藏或作为右侧指示器
+            if checked {
+                checkView.isHidden = false
+                checkView.frame = NSRect(x: bounds.width - 24, y: (height - 12) / 2, width: 12, height: 12)
+            } else {
+                checkView.isHidden = true
+                checkView.frame = .zero
+            }
+
+            // iconView: 居中于 NSRect(x: 13, y: (height - 16) / 2, width: 16, height: 16)，完美对齐原生 NSMenuItem.image（x=13~14）
+            if iconView.image != nil {
+                iconView.isHidden = false
+                iconView.frame = NSRect(x: 13, y: (height - 16) / 2, width: 16, height: 16)
+            } else {
+                iconView.isHidden = true
+                iconView.frame = .zero
+            }
+
+            // titleLabel: 严格起始于 x: 35，完全对齐原生 NSMenuItem.title（x=34~35）
+            let titleX: CGFloat = 35
+
+            if !accessoryText.isEmpty {
+                accessoryLabel.isHidden = false
+                let accWidth: CGFloat = 72
+                accessoryLabel.frame = NSRect(x: bounds.width - accWidth - 10, y: 3, width: accWidth, height: 18)
+                titleLabel.frame = NSRect(
+                    x: titleX,
+                    y: 3,
+                    width: max(bounds.width - titleX - accWidth - 14, 40),
+                    height: 18
+                )
+            } else {
+                accessoryLabel.isHidden = true
+                accessoryLabel.frame = .zero
+                let trailingReserved: CGFloat = checked ? 28 : 14
+                titleLabel.frame = NSRect(
+                    x: titleX,
+                    y: 3,
+                    width: max(bounds.width - titleX - trailingReserved, 40),
+                    height: 18
+                )
+            }
         }
-        let titleX: CGFloat = iconView.image == nil ? 26 : 46
-        titleLabel.frame = NSRect(
-            x: titleX,
-            y: 3,
-            width: max(bounds.width - titleX - accessoryWidth - 14, 40),
-            height: 18
-        )
     }
 
     override func viewDidMoveToSuperview() {
@@ -1400,12 +1507,14 @@ final class StickyMenuItemView: NSView {
     func apply(
         title: String? = nil,
         accessory: String? = nil,
+        icon: NSImage? = nil,
         checked: Bool? = nil,
         enabled: Bool? = nil,
         toolTip: String? = nil
     ) {
         if let title { titleText = title }
         if let accessory { accessoryText = accessory }
+        if let icon { iconView.image = icon }
         if let checked { self.checked = checked }
         if let enabled { itemEnabled = enabled }
         if let toolTip { self.toolTip = toolTip }
