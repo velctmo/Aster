@@ -1,6 +1,27 @@
 import SwiftUI
 import AppKit
 
+// MARK: - AsterMetrics (工业级 8pt 度量系统)
+public enum AsterMetrics {
+    // 间距节律 (8pt 网格)
+    public static let spacingMicro: CGFloat = 4
+    public static let spacingTight: CGFloat = 8
+    public static let spacingStandard: CGFloat = 12
+    public static let spacingRelaxed: CGFloat = 16
+    public static let spacingSection: CGFloat = 24
+
+    // 连续曲率圆角 (Continuous Curves)
+    public static let radiusBadge: CGFloat = 4.5
+    public static let radiusControl: CGFloat = 6.0
+    public static let radiusCard: CGFloat = 10.0
+    public static let radiusSheet: CGFloat = 12.0
+
+    // 状态栏菜单对齐槽位
+    public static let menuIconColumnWidth: CGFloat = 18.0
+    public static let menuTextIndent: CGFloat = 26.0
+    public static let menuAccessoryWidth: CGFloat = 64.0
+}
+
 // MARK: - Design Tokens (整齐分区统一度量)
 public enum DesignTokens {
     public static let pagePadding: CGFloat = 24
@@ -364,48 +385,67 @@ public enum StrategyPresentation {
     }
 }
 
-// MARK: - macOS 26 液态玻璃 (Liquid Glass) 设计系统
+// MARK: - 原生微边框 (Native Hairline Border) 设计系统
+public struct NativeHairlineBorder: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    var cornerRadius: CGFloat
+    var lineWidth: CGFloat
+
+    public init(cornerRadius: CGFloat = AsterMetrics.radiusCard, lineWidth: CGFloat = 0.5) {
+        self.cornerRadius = cornerRadius
+        self.lineWidth = lineWidth
+    }
+
+    public func body(content: Content) -> some View {
+        content.overlay(
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .strokeBorder(
+                    colorScheme == .dark
+                        ? Color.white.opacity(0.12)
+                        : Color.black.opacity(0.08),
+                    lineWidth: lineWidth
+                )
+        )
+    }
+}
+
 public struct LiquidGlassBevelBorder: View {
     @Environment(\.colorScheme) private var colorScheme
     public var cornerRadius: CGFloat
     public var lineWidth: CGFloat
 
-    public init(cornerRadius: CGFloat = 12, lineWidth: CGFloat = 0.8) {
+    public init(cornerRadius: CGFloat = AsterMetrics.radiusCard, lineWidth: CGFloat = 0.5) {
         self.cornerRadius = cornerRadius
         self.lineWidth = lineWidth
     }
 
     public var body: some View {
-        let gradient = LinearGradient(
-            stops: [
-                .init(color: colorScheme == .dark ? Color.white.opacity(0.24) : Color.white.opacity(0.55), location: 0.0),
-                .init(color: colorScheme == .dark ? Color.white.opacity(0.06) : Color.white.opacity(0.18), location: 0.40),
-                .init(color: colorScheme == .dark ? Color.black.opacity(0.25) : Color.black.opacity(0.06), location: 1.0)
-            ],
-            startPoint: .top,
-            endPoint: .bottom
-        )
-
-        RoundedRectangle(cornerRadius: cornerRadius)
-            .strokeBorder(gradient, lineWidth: lineWidth)
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .strokeBorder(
+                colorScheme == .dark
+                    ? Color.white.opacity(0.12)
+                    : Color.black.opacity(0.08),
+                lineWidth: lineWidth
+            )
     }
 }
 
 public extension View {
-    func liquidGlassBorder(cornerRadius: CGFloat = 12, lineWidth: CGFloat = 0.8) -> some View {
-        self.overlay(
-            LiquidGlassBevelBorder(cornerRadius: cornerRadius, lineWidth: lineWidth)
-        )
+    func nativeHairlineBorder(cornerRadius: CGFloat = AsterMetrics.radiusCard, lineWidth: CGFloat = 0.5) -> some View {
+        self.modifier(NativeHairlineBorder(cornerRadius: cornerRadius, lineWidth: lineWidth))
+    }
+
+    func liquidGlassBorder(cornerRadius: CGFloat = AsterMetrics.radiusCard, lineWidth: CGFloat = 0.5) -> some View {
+        self.nativeHairlineBorder(cornerRadius: cornerRadius, lineWidth: lineWidth)
     }
 }
 
-// 原生液态玻璃通用卡片容器
+// 原生液态玻璃通用卡片容器 (升级为 NativeHairlineBorder，去除粗暴投影)
 public struct LiquidGlassCard<Content: View>: View {
-    @Environment(\.colorScheme) private var colorScheme
     public var cornerRadius: CGFloat
     public var content: () -> Content
 
-    public init(cornerRadius: CGFloat = 12, @ViewBuilder content: @escaping () -> Content) {
+    public init(cornerRadius: CGFloat = AsterMetrics.radiusCard, @ViewBuilder content: @escaping () -> Content) {
         self.cornerRadius = cornerRadius
         self.content = content
     }
@@ -413,16 +453,10 @@ public struct LiquidGlassCard<Content: View>: View {
     public var body: some View {
         content()
             .background(
-                RoundedRectangle(cornerRadius: cornerRadius)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(.ultraThinMaterial)
             )
-            .liquidGlassBorder(cornerRadius: cornerRadius)
-            .shadow(
-                color: colorScheme == .dark ? Color.black.opacity(0.22) : Color.black.opacity(0.04),
-                radius: 8,
-                x: 0,
-                y: 3
-            )
+            .nativeHairlineBorder(cornerRadius: cornerRadius)
     }
 }
 
@@ -563,12 +597,12 @@ public struct ProtocolBadge: View {
     }
 }
 
-// MARK: - 精致按钮样式系统 (高质感液态玻璃微投影 + 连续平滑圆角)
+// MARK: - 精致按钮样式系统 (高质感原生控件 + 连续平滑圆角，无发光彩色阴影)
 public struct ExquisitePrimaryButtonStyle: ButtonStyle {
-    public var height: CGFloat = 28
-    public var cornerRadius: CGFloat = 7
+    public var height: CGFloat
+    public var cornerRadius: CGFloat
 
-    public init(height: CGFloat = 28, cornerRadius: CGFloat = 7) {
+    public init(height: CGFloat = 26, cornerRadius: CGFloat = AsterMetrics.radiusControl) {
         self.height = height
         self.cornerRadius = cornerRadius
     }
@@ -577,27 +611,25 @@ public struct ExquisitePrimaryButtonStyle: ButtonStyle {
         configuration.label
             .font(.system(size: 12, weight: .semibold))
             .foregroundColor(.white)
-            .padding(.horizontal, 13)
+            .padding(.horizontal, 12)
             .frame(height: height)
             .background(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(Color.accentColor.opacity(configuration.isPressed ? 0.75 : 0.95))
+                    .fill(Color.accentColor.opacity(configuration.isPressed ? 0.82 : 1.0))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(Color.white.opacity(0.22), lineWidth: 0.8)
+                    .strokeBorder(Color.white.opacity(0.18), lineWidth: 0.5)
             )
-            .shadow(color: Color.accentColor.opacity(configuration.isPressed ? 0.08 : 0.22), radius: 4, x: 0, y: 2)
-            .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
-            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
 public struct ExquisiteSecondaryButtonStyle: ButtonStyle {
-    public var height: CGFloat = 28
-    public var cornerRadius: CGFloat = 7
+    public var height: CGFloat
+    public var cornerRadius: CGFloat
 
-    public init(height: CGFloat = 28, cornerRadius: CGFloat = 7) {
+    public init(height: CGFloat = 26, cornerRadius: CGFloat = AsterMetrics.radiusControl) {
         self.height = height
         self.cornerRadius = cornerRadius
     }
@@ -610,21 +642,23 @@ public struct ExquisiteSecondaryButtonStyle: ButtonStyle {
             .frame(height: height)
             .background(
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .fill(Color.primary.opacity(configuration.isPressed ? 0.1 : 0.05))
+                    .fill(Color.primary.opacity(configuration.isPressed ? 0.12 : 0.06))
             )
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.8)
-            )
-            .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
-            .animation(.easeOut(duration: 0.15), value: configuration.isPressed)
+            .nativeHairlineBorder(cornerRadius: cornerRadius, lineWidth: 0.5)
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
 extension ButtonStyle where Self == ExquisitePrimaryButtonStyle {
     public static var exquisitePrimary: ExquisitePrimaryButtonStyle { ExquisitePrimaryButtonStyle() }
+    public static func exquisitePrimary(height: CGFloat = 26, cornerRadius: CGFloat = AsterMetrics.radiusControl) -> ExquisitePrimaryButtonStyle {
+        ExquisitePrimaryButtonStyle(height: height, cornerRadius: cornerRadius)
+    }
 }
 
 extension ButtonStyle where Self == ExquisiteSecondaryButtonStyle {
     public static var exquisiteSecondary: ExquisiteSecondaryButtonStyle { ExquisiteSecondaryButtonStyle() }
+    public static func exquisiteSecondary(height: CGFloat = 26, cornerRadius: CGFloat = AsterMetrics.radiusControl) -> ExquisiteSecondaryButtonStyle {
+        ExquisiteSecondaryButtonStyle(height: height, cornerRadius: cornerRadius)
+    }
 }
