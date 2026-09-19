@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -75,6 +76,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/nodes/delay", s.delay)
 	mux.HandleFunc("POST /api/v1/nodes/speedtest", s.speedtest)
 	mux.HandleFunc("GET /api/v1/rules", s.getRules)
+	mux.HandleFunc("GET /api/v1/rules/evaluate", s.evaluateRule)
 	mux.HandleFunc("POST /api/v1/rules", s.postRule)
 	mux.HandleFunc("POST /api/v1/rules/from-log", s.ruleFromLog)
 	mux.HandleFunc("POST /api/v1/rules/reorder", s.reorderRules)
@@ -498,6 +500,30 @@ func (s *Server) speedtest(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getRules(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.App.LiveRules())
+}
+
+func (s *Server) evaluateRule(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	target := strings.TrimSpace(q.Get("target"))
+	if target == "" {
+		writeErr(w, fmt.Errorf("target is required"))
+		return
+	}
+	process := strings.TrimSpace(q.Get("process"))
+	network := strings.TrimSpace(q.Get("network"))
+	port := 0
+	if pStr := strings.TrimSpace(q.Get("port")); pStr != "" {
+		if p, err := strconv.Atoi(pStr); err == nil {
+			port = p
+		}
+	}
+
+	result, err := s.App.EvaluateRule(target, process, port, network)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, result)
 }
 
 func (s *Server) postRule(w http.ResponseWriter, r *http.Request) {
