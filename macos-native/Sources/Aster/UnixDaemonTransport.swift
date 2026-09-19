@@ -204,11 +204,12 @@ enum UnixDaemonTransport {
 }
 
 final class UnixWebSocket: @unchecked Sendable {
+    private typealias ReceiveHandler = (Result<URLSessionWebSocketTask.Message, Error>) -> Void
     private let path: String
     private let token: String
     private var connection: NWConnection?
     private var buffer = Data()
-    private var pending: ((Result<URLSessionWebSocketTask.Message, Error>) -> Void)?
+    private var pending: ReceiveHandler?
     private var queued: [URLSessionWebSocketTask.Message] = []
     private var closed: Error?
     private let lock = NSLock()
@@ -238,17 +239,21 @@ final class UnixWebSocket: @unchecked Sendable {
         connection = nil
     }
 
-    func receive(completionHandler: @escaping (Result<URLSessionWebSocketTask.Message, Error>) -> Void) {
+    // AsterState is MainActor-isolated. NWConnection invokes us on its own
+    // queue, so every outward delivery must cross back to the main queue
+    // before it reaches the SwiftUI state object. Calling an actor-inherited
+    // callback directly here traps under Swift 6's runtime isolation checks.
+    func receive(completionHandler: @escaping ReceiveHandler) {
         lock.lock()
         if let closed {
             lock.unlock()
-            completionHandler(.failure(closed))
+            deliverOnMain(completionHandler, .failure(closed))
             return
         }
         if !queued.isEmpty {
             let next = queued.removeFirst()
             lock.unlock()
-            completionHandler(.success(next))
+            deliverOnMain(completionHandler, .success(next))
             return
         }
         pending = completionHandler
@@ -339,7 +344,7 @@ final class UnixWebSocket: @unchecked Sendable {
         if let pending {
             self.pending = nil
             lock.unlock()
-            pending(.success(message))
+            deliverOnMain(pending, .success(message))
             lock.lock()
         } else {
             queued.append(message)
@@ -353,9 +358,21 @@ final class UnixWebSocket: @unchecked Sendable {
         pending = nil
         queued.removeAll()
         lock.unlock()
-        callback?(.failure(error))
+        if let callback {
+            deliverOnMain(callback, .failure(error))
+        }
         connection?.cancel()
         connection = nil
+    }
+
+    private func deliverOnMain(_ callback: @escaping ReceiveHandler, _ result: Result<URLSessionWebSocketTask.Message, Error>) {
+        if Thread.isMainThread {
+            callback(result)
+        } else {
+            DispatchQueue.main.async {
+                callback(result)
+            }
+        }
     }
 
     private func sendPong(_ payload: Data) {
