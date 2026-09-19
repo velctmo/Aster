@@ -49,6 +49,7 @@ type App struct {
 	logs                *logstore.Store
 	prevIDs             map[string]bool
 	connections         map[string]clash.Connection
+	closedConnections   map[string]clash.Connection
 	processMu           sync.Mutex
 	processHist         map[string]procHistory
 	cachedProcs         []ProcessTrafficStat
@@ -166,6 +167,7 @@ func New() (*App, error) {
 		logs:              ls,
 		prevIDs:           map[string]bool{},
 		connections:       map[string]clash.Connection{},
+		closedConnections: map[string]clash.Connection{},
 		processHist:       map[string]procHistory{},
 		delays:            map[string]int{},
 		bandwidths:        map[string]float64{},
@@ -515,6 +517,17 @@ func (a *App) poll(ctx context.Context) {
 	prev := a.prevIDs
 	a.prevIDs = map[string]bool{}
 	previousConnections := a.connections
+	now := time.Now()
+	for i := range snap.Connections {
+		c := &snap.Connections[i]
+		var old *clash.Connection
+		if previousConnections != nil {
+			if prevConn, ok := previousConnections[c.ID]; ok {
+				old = &prevConn
+			}
+		}
+		EnrichConnectionDiagnostics(c, old, now)
+	}
 	if observeConnections {
 		a.connections = make(map[string]clash.Connection, len(snap.Connections))
 	} else {
@@ -529,6 +542,13 @@ func (a *App) poll(ctx context.Context) {
 	var delta ConnectionsDelta
 	if observeConnections {
 		delta = diffConnections(previousConnections, a.connections, snap.UploadTotal, snap.DownloadTotal)
+		for _, closedID := range delta.Closed {
+			if old, ok := previousConnections[closedID]; ok {
+				closedConn := old
+				closedConn.Diagnostics = InferClosedDiagnostics(old)
+				a.archiveClosedConnection(closedConn)
+			}
+		}
 	}
 	a.mu.Unlock()
 
@@ -571,7 +591,7 @@ func diffConnections(previous, current map[string]clash.Connection, uploadTotal,
 	delta := ConnectionsDelta{UploadTotal: uploadTotal, DownloadTotal: downloadTotal}
 	for id, connection := range current {
 		old, existed := previous[id]
-		if !existed || old.Upload != connection.Upload || old.Download != connection.Download || old.Rule != connection.Rule || old.Metadata != connection.Metadata || !sameChains(old.Chains, connection.Chains) {
+		if !existed || old.Upload != connection.Upload || old.Download != connection.Download || old.Rule != connection.Rule || old.Metadata != connection.Metadata || !sameChains(old.Chains, connection.Chains) || old.Diagnostics != connection.Diagnostics {
 			delta.Upserts = append(delta.Upserts, connection)
 		}
 	}
@@ -581,6 +601,127 @@ func diffConnections(previous, current map[string]clash.Connection, uploadTotal,
 		}
 	}
 	return delta
+}
+
+// EnrichConnectionDiagnostics calculates and enriches duration, speeds, and status for an active connection.
+func EnrichConnectionDiagnostics(c *clash.Connection, old *clash.Connection, now time.Time) {
+	// 1. DurationMs: RFC3339Nano / RFC3339 or history fallback
+	if t, ok := parseConnectionStart(c.Start); ok {
+		dur := now.Sub(t).Milliseconds()
+		if dur < 0 {
+			dur = 0
+		}
+		c.Diagnostics.DurationMs = dur
+	} else if old != nil {
+		c.Diagnostics.DurationMs = old.Diagnostics.DurationMs
+		if c.Diagnostics.DurationMs < 0 {
+			c.Diagnostics.DurationMs = 0
+		}
+	} else {
+		c.Diagnostics.DurationMs = 0
+	}
+
+	// 2. SpeedIn / SpeedOut: smooth diff from previous snapshot
+	if old != nil {
+		spIn := c.Download - old.Download
+		if spIn < 0 {
+			spIn = 0
+		}
+		spOut := c.Upload - old.Upload
+		if spOut < 0 {
+			spOut = 0
+		}
+		c.Diagnostics.SpeedIn = spIn
+		c.Diagnostics.SpeedOut = spOut
+	} else {
+		c.Diagnostics.SpeedIn = 0
+		c.Diagnostics.SpeedOut = 0
+	}
+
+	// 3. CloseReason / IsFailed: active vs rejected
+	if isRejectConnection(c.Rule, c.Chains) {
+		c.Diagnostics.CloseReason = "rejected"
+		c.Diagnostics.IsFailed = true
+	} else {
+		c.Diagnostics.CloseReason = "active"
+		c.Diagnostics.IsFailed = false
+	}
+}
+
+// InferClosedDiagnostics infers the final diagnostics when a connection closes.
+func InferClosedDiagnostics(c clash.Connection) clash.ConnectionDiagnostics {
+	diag := c.Diagnostics
+	diag.SpeedIn = 0
+	diag.SpeedOut = 0
+	if diag.DurationMs == 0 && c.Start != "" {
+		if t, ok := parseConnectionStart(c.Start); ok {
+			dur := time.Since(t).Milliseconds()
+			if dur > 0 {
+				diag.DurationMs = dur
+			}
+		}
+	}
+	if diag.CloseReason == "rejected" || isRejectConnection(c.Rule, c.Chains) {
+		diag.CloseReason = "rejected"
+		diag.IsFailed = true
+	} else if diag.DurationMs > 10000 && c.Download == 0 {
+		diag.CloseReason = "timeout"
+		diag.IsFailed = true
+	} else {
+		diag.CloseReason = "completed"
+		diag.IsFailed = false
+	}
+	return diag
+}
+
+func parseConnectionStart(start string) (time.Time, bool) {
+	if start == "" {
+		return time.Time{}, false
+	}
+	if t, err := time.Parse(time.RFC3339Nano, start); err == nil {
+		return t, true
+	}
+	if t, err := time.Parse(time.RFC3339, start); err == nil {
+		return t, true
+	}
+	return time.Time{}, false
+}
+
+func isRejectConnection(rule string, chains []string) bool {
+	if strings.EqualFold(rule, "reject") {
+		return true
+	}
+	for _, ch := range chains {
+		if strings.EqualFold(ch, "reject") || strings.Contains(strings.ToUpper(ch), "REJECT") {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *App) archiveClosedConnection(c clash.Connection) {
+	if a.closedConnections == nil {
+		a.closedConnections = make(map[string]clash.Connection)
+	}
+	a.closedConnections[c.ID] = c
+	if len(a.closedConnections) > 500 {
+		for k := range a.closedConnections {
+			delete(a.closedConnections, k)
+			if len(a.closedConnections) <= 400 {
+				break
+			}
+		}
+	}
+}
+
+func (a *App) ClosedConnection(id string) (clash.Connection, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.closedConnections == nil {
+		return clash.Connection{}, false
+	}
+	c, ok := a.closedConnections[id]
+	return c, ok
 }
 
 func (a *App) writeConfig(f state.File) error {
