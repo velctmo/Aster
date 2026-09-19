@@ -5,6 +5,12 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
 SING_BOX_VERSION="${SING_BOX_VERSION:-1.14.0}"
+GIT_BUILD_NUMBER="$(git show -s --format=%ct HEAD 2>/dev/null || date +%Y%m%d%H%M%S)"
+# A PKG update is only applied when the bundle version advances.  Keeping
+# this at 1.0.0 made Installer retain an older Aster.app even though the PKG
+# itself contained a newer executable.
+ASTER_BUILD_VERSION="${ASTER_BUILD_VERSION:-$GIT_BUILD_NUMBER}"
+ASTER_VERSION="${ASTER_VERSION:-1.0.$ASTER_BUILD_VERSION}"
 if [[ "$SING_BOX_VERSION" != "1.14.0" && -z "${SING_BOX_BINARY_SHA256:-}" ]]; then
   echo "错误: 非默认 sing-box 版本必须同时提供 SING_BOX_BINARY_SHA256" >&2
   exit 1
@@ -18,6 +24,7 @@ esac
 
 echo "=================================================="
 echo "▶ 正在打包 Aster 纯原生 macOS 桌面应用程序..."
+echo "  版本: $ASTER_VERSION ($ASTER_BUILD_VERSION)"
 echo "=================================================="
 
 mkdir -p bin build vendor/cores vendor/rules
@@ -148,7 +155,7 @@ if [[ -d vendor/rules ]] && compgen -G "vendor/rules/*" >/dev/null; then
   cp -R vendor/rules/. "$APP_DIR/Contents/Resources/rules/"
 fi
 
-cat > "$APP_DIR/Contents/Info.plist" << 'PLISTEOF'
+cat > "$APP_DIR/Contents/Info.plist" <<PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -170,9 +177,9 @@ cat > "$APP_DIR/Contents/Info.plist" << 'PLISTEOF'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>${ASTER_VERSION}</string>
     <key>CFBundleVersion</key>
-    <string>1.0.0</string>
+    <string>${ASTER_BUILD_VERSION}</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>

@@ -5,8 +5,10 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
 ./scripts/build_aster_mac.sh
+GIT_BUILD_NUMBER="$(git show -s --format=%ct HEAD 2>/dev/null || date +%Y%m%d%H%M%S)"
+ASTER_BUILD_VERSION="${ASTER_BUILD_VERSION:-$GIT_BUILD_NUMBER}"
 GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o bin/aster-helper ./cmd/aster-helper
-chmod +x bin/aster-helper packaging/scripts/postinstall
+chmod +x bin/aster-helper packaging/scripts/preinstall packaging/scripts/postinstall
 
 STAGE="build/pkg-root"
 SCRIPTS_STAGE="build/pkg-scripts"
@@ -20,6 +22,7 @@ ditto --norsrc build/Aster.app "$STAGE/Applications/Aster.app"
 cp bin/aster-helper "$STAGE/Library/Application Support/Aster/aster-helper"
 cp build/Aster.app/Contents/Resources/sing-box "$STAGE/Library/Application Support/Aster/cores/sing-box"
 cp packaging/app.aster.helper.plist "$STAGE/Library/LaunchDaemons/app.aster.helper.plist"
+cp packaging/scripts/preinstall "$SCRIPTS_STAGE/preinstall"
 cp packaging/scripts/postinstall "$SCRIPTS_STAGE/postinstall"
 chmod 755 "$STAGE/Applications/Aster.app/Contents/Resources/sing-box"
 chmod 755 "$STAGE/Library/Application Support/Aster/cores/sing-box"
@@ -31,7 +34,7 @@ find "$STAGE" -name '._*' -type f -delete
 find "$SCRIPTS_STAGE" -name '._*' -type f -delete
 
 pkgbuild --root "$STAGE" --scripts "$SCRIPTS_STAGE" --component-plist packaging/component.plist \
-  --identifier app.aster --version 1.0.0 --install-location / build/Aster.pkg
+  --identifier app.aster --version "$ASTER_BUILD_VERSION" --install-location / build/Aster.pkg
 if pkgutil --payload-files build/Aster.pkg | grep -Eq '(^|/)\._'; then
   echo "错误: PKG payload contains AppleDouble files" >&2
   exit 1

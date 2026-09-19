@@ -1,0 +1,12 @@
+#!/bin/zsh
+set -eu
+
+# Stop processes from the old bundle before Installer replaces it. This only
+# targets Aster's exact executable paths, never broad process names.
+app="/Applications/Aster.app"
+daemon="$app/Contents/Resources/aster-daemon"
+client="$app/Contents/MacOS/Aster"
+
+/usr/bin/pkill -f "^${client}$" >/dev/null 2>&1 || true
+/usr/bin/pkill -f "^${daemon}$" >/dev/null 2>&1 || true
+exit 0

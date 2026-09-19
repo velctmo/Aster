@@ -65,6 +65,10 @@ jobs:
           file build/Aster.app/Contents/Resources/aster-daemon | grep -q "arm64"
           file build/Aster.app/Contents/Resources/sing-box | grep -q "arm64"
           codesign --verify --deep --strict build/Aster.app
+          app_build_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' build/Aster.app/Contents/Info.plist)"
+          test "$app_build_version" -gt 1
+          pkgutil --expand-full build/Aster-unsigned.pkg build/pkg-inspect
+          grep -q "version=\"$app_build_version\"" build/pkg-inspect/PackageInfo
           unzip -Z1 build/Aster-macos-arm64.zip | grep -q 'Aster.app/Contents/Resources/sing-box'
           pkgutil --payload-files build/Aster-unsigned.pkg | grep -q 'Library/Application Support/Aster/aster-helper'
           pkgutil --payload-files build/Aster-unsigned.pkg | grep -q 'Library/Application Support/Aster/cores/sing-box'
