@@ -23,8 +23,16 @@ func NewClient() Client {
 }
 
 func (c Client) Installed() bool {
-	_, err := os.Stat(c.Socket)
+	// A stale socket is common after a failed launchd job.  Do not advertise
+	// TUN as available merely because its filesystem entry still exists.
+	_, err := c.Health()
 	return err == nil
+}
+
+// Health verifies that the privileged service is accepting authenticated local
+// protocol requests. It deliberately does not refresh the TUN lease.
+func (c Client) Health() (Response, error) {
+	return c.callWithTimeout(Request{Action: "health"}, 250*time.Millisecond, 250*time.Millisecond)
 }
 
 func (c Client) Start(config []byte) (Response, error) {
@@ -43,15 +51,19 @@ func (c Client) ClearProxy(service string, port int) (Response, error) {
 }
 
 func (c Client) call(request Request) (Response, error) {
+	return c.callWithTimeout(request, 2*time.Second, 10*time.Second)
+}
+
+func (c Client) callWithTimeout(request Request, connectTimeout, requestTimeout time.Duration) (Response, error) {
 	if len(request.Config) > MaxConfigSize {
 		return Response{}, fmt.Errorf("核心配置超过 %d MiB 限制", MaxConfigSize>>20)
 	}
-	conn, err := net.DialTimeout("unix", c.Socket, 2*time.Second)
+	conn, err := net.DialTimeout("unix", c.Socket, connectTimeout)
 	if err != nil {
 		return Response{}, fmt.Errorf("%w：请先安装 Aster 网络组件", ErrUnavailable)
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(requestTimeout))
 	if err := json.NewEncoder(conn).Encode(request); err != nil {
 		return Response{}, err
 	}

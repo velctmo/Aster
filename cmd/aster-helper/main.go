@@ -19,8 +19,8 @@ import (
 	"syscall"
 	"time"
 
-	"golang.org/x/sys/unix"
 	"aster/internal/helper"
+	"golang.org/x/sys/unix"
 )
 
 const managedCoreOwner = 0
@@ -179,6 +179,10 @@ func (s *server) handle(conn *net.UnixConn) {
 }
 
 func (s *server) perform(request helper.Request) helper.Response {
+	if request.Action == "health" {
+		// A probe must not keep an orphaned TUN process alive.
+		return helper.Response{OK: true, PID: s.persist.PID, Generation: s.persist.Generation}
+	}
 	switch request.Action {
 	case "start":
 		if s.alive() {

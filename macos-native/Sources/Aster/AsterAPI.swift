@@ -14,6 +14,7 @@ public class AsterState: ObservableObject {
     public let connectionStore = ConnectionStore()
     public let runtimeStore = RuntimeStore()
     public let ruleStore = RuleStore()
+    private var daemonProcess: Process?
 
     // 核心状态
     @Published public var status: AppStatus = .placeholder {
@@ -520,6 +521,7 @@ public class AsterState: ObservableObject {
     }
 
     private func launchDaemonProcess() {
+        if let daemonProcess, daemonProcess.isRunning { return }
         let fileManager = FileManager.default
         var daemonPath = ""
 
@@ -539,10 +541,23 @@ public class AsterState: ObservableObject {
         process.executableURL = URL(fileURLWithPath: daemonPath)
         process.arguments = []
         process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
+        let logURL = dataDirURL().appendingPathComponent("daemon-ui-launch.log")
+        try? FileManager.default.createDirectory(at: dataDirURL(), withIntermediateDirectories: true)
+        if FileManager.default.fileExists(atPath: logURL.path) == false {
+            FileManager.default.createFile(atPath: logURL.path, contents: nil)
+        }
+        process.standardError = try? FileHandle(forWritingTo: logURL)
+        process.terminationHandler = { [weak self] finished in
+            guard finished.terminationStatus != 0 else { return }
+            DispatchQueue.main.async {
+                guard self?.daemonProcess === finished else { return }
+                self?.daemonError = "控制面异常退出（退出码 \(finished.terminationStatus)）；详情见 daemon-ui-launch.log"
+            }
+        }
 
         do {
             try process.run()
+            self.daemonProcess = process
             self.daemonError = ""
             Task {
                 for _ in 0..<8 {

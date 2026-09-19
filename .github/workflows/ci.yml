@@ -67,6 +67,8 @@ jobs:
           codesign --verify --deep --strict build/Aster.app
           unzip -Z1 build/Aster-macos-arm64.zip | grep -q 'Aster.app/Contents/Resources/sing-box'
           pkgutil --payload-files build/Aster-unsigned.pkg | grep -q 'Library/Application Support/Aster/aster-helper'
+          pkgutil --payload-files build/Aster-unsigned.pkg | grep -q 'Library/Application Support/Aster/cores/sing-box'
+          ! pkgutil --payload-files build/Aster-unsigned.pkg | grep -Eq '(^|/)\._'
       - name: Validate bundled core performance gate
         run: GOOS=darwin GOARCH=arm64 go test -count=1 ./internal/render -run 'TestBundledSingBox(Checks500Nodes|Serves100ConcurrentProxyConnections)'
       - name: Upload artifact

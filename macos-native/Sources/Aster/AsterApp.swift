@@ -193,7 +193,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
             .sink { [weak self] _ in self?.refreshStatusMenu() }
         captureMenuSubscription = state.$status
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.syncCaptureMenuItems() }
+            .sink { [weak self] _ in
+                self?.syncCaptureMenuItems()
+                self?.updateStatusItemTitle()
+                self?.refreshStatusMenu()
+            }
 
         // 3. 构建标准系统主菜单
         setupAppMainMenu()
@@ -519,9 +523,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
                 await AsterState.shared.fetchStrategyGroups()
             }
         }
-        if !isMenuOpen {
-            buildStatusMenu(menu)
-        }
+        // AppKit calls this immediately before it starts tracking the menu.
+        // This is the one safe point to rebuild its hierarchy.
+        if !isMenuOpen { buildStatusMenu(menu) }
     }
 
     public func menuWillOpen(_ menu: NSMenu) {
@@ -530,11 +534,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
             Task { @MainActor in
                 await AsterState.shared.fetchStrategyGroups()
                 if self.isMenuOpen {
-                    self.buildStatusMenu(menu)
+                    // Never remove/re-add menu items while AppKit is tracking
+                    // the menu; that closes popups and loses mouse tracking.
+                    self.updateLiveMenuItems(in: menu)
                 }
             }
         }
-        buildStatusMenu(menu)
     }
 
     public func menuDidClose(_ menu: NSMenu) {
@@ -562,6 +567,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
             }
         }()
         let modeRootItem = NSMenuItem(title: "出站模式", action: nil, keyEquivalent: "")
+        modeRootItem.identifier = NSUserInterfaceItemIdentifier("aster.outbound-mode")
         modeRootItem.image = NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: "出站模式")
         
         let modeAttr = NSMutableAttributedString(string: "出站模式", attributes: [
@@ -698,6 +704,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         if !state.configs.isEmpty {
             let activeConfigName = state.configs.first(where: { $0.active })?.name ?? "默认配置"
             let configRootItem = createMenuItem(title: "切换配置", icon: "doc.plaintext", action: nil)
+            configRootItem.identifier = NSUserInterfaceItemIdentifier("aster.active-config")
             
             let cfgAttr = NSMutableAttributedString(string: "切换配置", attributes: [
                 .font: NSFont.menuFont(ofSize: 0),
@@ -819,6 +826,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
     private func updateLiveMenuItems(in menu: NSMenu) {
         let state = AsterState.shared
         for item in menu.items {
+            switch item.identifier?.rawValue {
+            case "aster.outbound-mode":
+                updateModeMenuTitle(item, mode: state.status.mode)
+            case "aster.active-config":
+                updateConfigMenuTitle(item, configs: state.configs)
+            default:
+                break
+            }
             if let view = item.view as? StickyMenuItemView {
                 if case .capture(let systemProxy) = view.kind {
                     applyCaptureState(to: item, systemProxy: systemProxy)
@@ -847,6 +862,35 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
                 }
             }
         }
+    }
+
+    private func updateModeMenuTitle(_ item: NSMenuItem, mode: String) {
+        let badge: String
+        switch mode {
+        case "global": badge = "GLOBAL"
+        case "direct": badge = "DIRECT"
+        default: badge = "RULE"
+        }
+        let title = NSMutableAttributedString(string: "出站模式", attributes: [
+            .font: NSFont.menuFont(ofSize: 0), .foregroundColor: NSColor.labelColor,
+        ])
+        title.append(NSAttributedString(string: "   [\(badge)]", attributes: [
+            .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .bold),
+            .foregroundColor: NSColor.controlAccentColor,
+        ]))
+        item.attributedTitle = title
+    }
+
+    private func updateConfigMenuTitle(_ item: NSMenuItem, configs: [ConfigProfileItem]) {
+        let activeName = configs.first(where: { $0.active })?.name ?? "默认配置"
+        let title = NSMutableAttributedString(string: "切换配置", attributes: [
+            .font: NSFont.menuFont(ofSize: 0), .foregroundColor: NSColor.labelColor,
+        ])
+        title.append(NSAttributedString(string: "   \(activeName.truncated(toVisualWidth: 14))", attributes: [
+            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular),
+            .foregroundColor: NSColor.secondaryLabelColor,
+        ]))
+        item.attributedTitle = title
     }
 
     private func refreshStickyView(_ view: StickyMenuItemView) {

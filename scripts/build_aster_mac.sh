@@ -50,42 +50,29 @@ if [[ -f "$PBXPROJ" ]]; then
 fi
 
 echo "  [2/5] 编译 Aster SwiftUI 客户端..."
-SWIFT_BUILT=0
-# xcodebuild 存在于 Command Line Tools，但没有完整 Xcode 时会直接失败；失败则回退 swiftc
-if [[ -d macos-native/Aster.xcodeproj ]] && command -v xcodebuild >/dev/null 2>&1 \
-  && xcodebuild -version >/dev/null 2>&1; then
-  XCODE_LOG="build/xcodebuild.log"
-  if xcodebuild -project macos-native/Aster.xcodeproj -scheme Aster -configuration Release \
-    -destination 'platform=macOS,arch=arm64' \
-    -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO build >"$XCODE_LOG" 2>&1; then
-    BUILT_APP=$(find build/DerivedData -name 'Aster.app' -type d | head -1 || true)
-    if [[ -n "${BUILT_APP:-}" ]]; then
-      cp "$BUILT_APP/Contents/MacOS/Aster" bin/Aster
-      SWIFT_BUILT=1
-    else
-      echo "  xcodebuild 成功但未找到 Aster.app，回退 swiftc。日志末尾："
-      tail -n 40 "$XCODE_LOG" || true
-    fi
-  else
-    echo "  xcodebuild 失败，回退 swiftc。日志末尾："
-    tail -n 80 "$XCODE_LOG" || true
-  fi
+# Aster uses SwiftUI property-wrapper macros. The Command Line Tools SDK has
+# the Swift interfaces but not the SwiftUIMacros plugin, so a bare swiftc
+# fallback produces a misleading wall of macro errors instead of an app.
+if ! command -v xcodebuild >/dev/null 2>&1 || ! xcodebuild -version >/dev/null 2>&1; then
+  echo "错误: 构建 Aster.app 需要完整 Xcode 15+（当前仅安装 Command Line Tools）。" >&2
+  echo "请安装 Xcode 后执行: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer" >&2
+  exit 1
 fi
-if [[ "$SWIFT_BUILT" -ne 1 ]]; then
-  echo "  使用 swiftc 编译（无可用 Xcode / xcodebuild 失败）..."
-  mkdir -p build/ModuleCache
-  SWIFT_VER="6"
-  if ! swiftc --version 2>&1 | grep -Eq 'Swift version [6-9]'; then
-    SWIFT_VER="5"
-  fi
-  SWIFT_FLAGS=(-module-cache-path "$(pwd)/build/ModuleCache" -Xcc -fmodules-cache-path="$(pwd)/build/ModuleCache" -swift-version "$SWIFT_VER" -parse-as-library -O)
-  if [[ "$SWIFT_VER" == "6" ]]; then
-    SWIFT_FLAGS+=(-strict-concurrency=complete)
-  fi
-  swiftc "${SWIFT_FLAGS[@]}" "${SWIFT_SOURCES[@]}" -o bin/Aster
+XCODE_LOG="build/xcodebuild.log"
+if ! xcodebuild -project macos-native/Aster.xcodeproj -scheme Aster -configuration Release \
+  -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO build >"$XCODE_LOG" 2>&1; then
+  echo "错误: xcodebuild 编译失败。日志末尾：" >&2
+  tail -n 80 "$XCODE_LOG" >&2 || true
+  exit 1
 fi
+BUILT_APP=$(find build/DerivedData -name 'Aster.app' -type d | head -1 || true)
+if [[ -z "${BUILT_APP:-}" ]]; then
+  echo "错误: xcodebuild 成功但未找到 Aster.app。" >&2
+  exit 1
+fi
+cp "$BUILT_APP/Contents/MacOS/Aster" bin/Aster
 chmod +x bin/Aster
-rm -rf build/ModuleCache
 
 ensure_singbox() {
   local dest="vendor/cores/sing-box-${SING_BOX_VERSION}-darwin-${SB_ARCH}"

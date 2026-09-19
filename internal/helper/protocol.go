@@ -8,7 +8,9 @@ const (
 	DefaultSocket = "/var/run/app.aster.helper.sock"
 	// ManagedCorePath is the only binary the root helper may execute. It is
 	// installed and made root-owned by the optional network-component PKG.
-	ManagedCorePath = "/Applications/Aster.app/Contents/Resources/sing-box"
+	// Keep it outside Aster.app: an app bundle can be moved, replaced by a ZIP
+	// build, or removed without uninstalling the launchd helper.
+	ManagedCorePath = "/Library/Application Support/Aster/cores/sing-box"
 	MaxConfigSize   = 4 << 20
 )
 

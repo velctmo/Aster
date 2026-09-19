@@ -12,13 +12,17 @@ STAGE="build/pkg-root"
 SCRIPTS_STAGE="build/pkg-scripts"
 rm -rf "$STAGE"
 rm -rf "$SCRIPTS_STAGE"
-mkdir -p "$STAGE/Applications" "$STAGE/Library/Application Support/Aster" "$STAGE/Library/LaunchDaemons"
+mkdir -p "$STAGE/Applications" "$STAGE/Library/Application Support/Aster/cores" "$STAGE/Library/LaunchDaemons"
 mkdir -p "$SCRIPTS_STAGE"
-cp -R build/Aster.app "$STAGE/Applications/Aster.app"
+# ditto --norsrc prevents resource-fork / AppleDouble entries from leaking
+# into the installer payload on APFS volumes.
+ditto --norsrc build/Aster.app "$STAGE/Applications/Aster.app"
 cp bin/aster-helper "$STAGE/Library/Application Support/Aster/aster-helper"
+cp build/Aster.app/Contents/Resources/sing-box "$STAGE/Library/Application Support/Aster/cores/sing-box"
 cp packaging/app.aster.helper.plist "$STAGE/Library/LaunchDaemons/app.aster.helper.plist"
 cp packaging/scripts/postinstall "$SCRIPTS_STAGE/postinstall"
 chmod 755 "$STAGE/Applications/Aster.app/Contents/Resources/sing-box"
+chmod 755 "$STAGE/Library/Application Support/Aster/cores/sing-box"
 # Do this only in generated staging directories. macOS provenance xattrs would
 # otherwise make pkgbuild emit AppleDouble `._*` payload and script entries.
 xattr -cr "$STAGE" "$SCRIPTS_STAGE"
@@ -28,6 +32,10 @@ find "$SCRIPTS_STAGE" -name '._*' -type f -delete
 
 pkgbuild --root "$STAGE" --scripts "$SCRIPTS_STAGE" --component-plist packaging/component.plist \
   --identifier app.aster --version 1.0.0 --install-location / build/Aster.pkg
+if pkgutil --payload-files build/Aster.pkg | grep -Eq '(^|/)\._'; then
+  echo "错误: PKG payload contains AppleDouble files" >&2
+  exit 1
+fi
 cp -f build/Aster.pkg build/Aster-unsigned.pkg
 echo "PKG: build/Aster.pkg"
 echo "首次安装将请求一次管理员权限；未签名开源构建可能需要在系统设置中确认。"
