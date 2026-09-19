@@ -124,3 +124,247 @@ func TestParseSSWithPlugin(t *testing.T) {
 		t.Fatalf("expected plugin v2ray-plugin, got %v", m["plugin"])
 	}
 }
+
+func TestParseWireGuard_ClashYAML(t *testing.T) {
+	t.Run("regular wireguard", func(t *testing.T) {
+		raw := `
+proxies:
+  - name: wg-node
+    type: wireguard
+    server: 198.51.100.1
+    port: 51820
+    ip: 172.16.0.2
+    public-key: peer-pub-key-123
+    private-key: priv-key-456
+    preshared-key: psk-789
+    mtu: 1420
+`
+		r, err := Parse(raw)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(r.Nodes) != 1 {
+			t.Fatalf("expected 1 node, got %d", len(r.Nodes))
+		}
+		node := r.Nodes[0]
+		if node.Protocol != "wireguard" {
+			t.Fatalf("expected protocol wireguard, got %s", node.Protocol)
+		}
+		if node.Name != "wg-node" {
+			t.Fatalf("expected name wg-node, got %s", node.Name)
+		}
+
+		var m map[string]any
+		if err := json.Unmarshal(node.Outbound, &m); err != nil {
+			t.Fatalf("unmarshal outbound: %v", err)
+		}
+		if m["type"] != "wireguard" {
+			t.Fatalf("expected type wireguard, got %v", m["type"])
+		}
+		if m["tag"] != "wg-node" {
+			t.Fatalf("expected tag wg-node, got %v", m["tag"])
+		}
+		if m["server"] != "198.51.100.1" {
+			t.Fatalf("expected server 198.51.100.1, got %v", m["server"])
+		}
+		if m["server_port"] != float64(51820) {
+			t.Fatalf("expected server_port 51820, got %v", m["server_port"])
+		}
+		addrs, ok := m["local_address"].([]any)
+		if !ok || len(addrs) != 1 || addrs[0] != "172.16.0.2/32" {
+			t.Fatalf("expected local_address [\"172.16.0.2/32\"], got %v", m["local_address"])
+		}
+		if m["private_key"] != "priv-key-456" {
+			t.Fatalf("expected private_key priv-key-456, got %v", m["private_key"])
+		}
+		if m["peer_public_key"] != "peer-pub-key-123" {
+			t.Fatalf("expected peer_public_key peer-pub-key-123, got %v", m["peer_public_key"])
+		}
+		if m["pre_shared_key"] != "psk-789" {
+			t.Fatalf("expected pre_shared_key psk-789, got %v", m["pre_shared_key"])
+		}
+		if m["mtu"] != float64(1420) {
+			t.Fatalf("expected mtu 1420, got %v", m["mtu"])
+		}
+		if _, ok := m["reserved"]; ok {
+			t.Fatalf("expected no reserved field, got %v", m["reserved"])
+		}
+	})
+
+	t.Run("warp wireguard with reserved slice and dual-stack ips", func(t *testing.T) {
+		raw := `
+proxies:
+  - name: warp-slice
+    type: wg
+    server: 162.159.192.1
+    port: 2408
+    ips:
+      - "172.16.0.2"
+      - "2606:4700:110:8f81:85e8:5350:2ff1:d0cf"
+    public-key: warp-pub-key
+    private-key: warp-priv-key
+    reserved: [0, 0, 0]
+`
+		r, err := Parse(raw)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(r.Nodes) != 1 {
+			t.Fatalf("expected 1 node, got %d", len(r.Nodes))
+		}
+		node := r.Nodes[0]
+		if node.Protocol != "wireguard" {
+			t.Fatalf("expected protocol wireguard, got %s", node.Protocol)
+		}
+
+		var m map[string]any
+		if err := json.Unmarshal(node.Outbound, &m); err != nil {
+			t.Fatalf("unmarshal outbound: %v", err)
+		}
+		addrs, ok := m["local_address"].([]any)
+		if !ok || len(addrs) != 2 || addrs[0] != "172.16.0.2/32" || addrs[1] != "2606:4700:110:8f81:85e8:5350:2ff1:d0cf/128" {
+			t.Fatalf("expected dual-stack normalized addresses, got %v", m["local_address"])
+		}
+		res, ok := m["reserved"].([]any)
+		if !ok || len(res) != 3 || res[0] != float64(0) || res[1] != float64(0) || res[2] != float64(0) {
+			t.Fatalf("expected reserved [0, 0, 0], got %v", m["reserved"])
+		}
+		if m["mtu"] != float64(1420) {
+			t.Fatalf("expected default mtu 1420, got %v", m["mtu"])
+		}
+	})
+
+	t.Run("warp wireguard with string reserved and custom mtu", func(t *testing.T) {
+		raw := `
+proxies:
+  - name: warp-str
+    type: wireguard
+    server: 162.159.192.1
+    port: 2408
+    ip: "172.16.0.2/32"
+    public-key: warp-pub-key
+    private-key: warp-priv-key
+    reserved: "0,0,0"
+    mtu: 1280
+`
+		r, err := Parse(raw)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(r.Nodes) != 1 {
+			t.Fatalf("expected 1 node, got %d", len(r.Nodes))
+		}
+		node := r.Nodes[0]
+
+		var m map[string]any
+		if err := json.Unmarshal(node.Outbound, &m); err != nil {
+			t.Fatalf("unmarshal outbound: %v", err)
+		}
+		res, ok := m["reserved"].([]any)
+		if !ok || len(res) != 3 || res[0] != float64(0) || res[1] != float64(0) || res[2] != float64(0) {
+			t.Fatalf("expected reserved [0, 0, 0], got %v", m["reserved"])
+		}
+		if m["mtu"] != float64(1280) {
+			t.Fatalf("expected mtu 1280, got %v", m["mtu"])
+		}
+	})
+}
+
+func TestParseWireGuard_URI(t *testing.T) {
+	t.Run("standard wireguard scheme", func(t *testing.T) {
+		raw := "wireguard://priv-key-123@198.51.100.1:51820?public_key=peer-pub-123&address=172.16.0.2&reserved=0,0,0&mtu=1420#wg-node"
+		r, err := Parse(raw)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(r.Nodes) != 1 {
+			t.Fatalf("expected 1 node, got %d", len(r.Nodes))
+		}
+		node := r.Nodes[0]
+		if node.Protocol != "wireguard" {
+			t.Fatalf("expected protocol wireguard, got %s", node.Protocol)
+		}
+		if node.Name != "wg-node" {
+			t.Fatalf("expected name wg-node, got %s", node.Name)
+		}
+
+		var m map[string]any
+		if err := json.Unmarshal(node.Outbound, &m); err != nil {
+			t.Fatalf("unmarshal outbound: %v", err)
+		}
+		if m["type"] != "wireguard" {
+			t.Fatalf("expected type wireguard, got %v", m["type"])
+		}
+		if m["server"] != "198.51.100.1" {
+			t.Fatalf("expected server 198.51.100.1, got %v", m["server"])
+		}
+		if m["server_port"] != float64(51820) {
+			t.Fatalf("expected server_port 51820, got %v", m["server_port"])
+		}
+		if m["private_key"] != "priv-key-123" {
+			t.Fatalf("expected private_key priv-key-123, got %v", m["private_key"])
+		}
+		if m["peer_public_key"] != "peer-pub-123" {
+			t.Fatalf("expected peer_public_key peer-pub-123, got %v", m["peer_public_key"])
+		}
+		addrs, ok := m["local_address"].([]any)
+		if !ok || len(addrs) != 1 || addrs[0] != "172.16.0.2/32" {
+			t.Fatalf("expected local_address [\"172.16.0.2/32\"], got %v", m["local_address"])
+		}
+		res, ok := m["reserved"].([]any)
+		if !ok || len(res) != 3 || res[0] != float64(0) || res[1] != float64(0) || res[2] != float64(0) {
+			t.Fatalf("expected reserved [0, 0, 0], got %v", m["reserved"])
+		}
+		if m["mtu"] != float64(1420) {
+			t.Fatalf("expected mtu 1420, got %v", m["mtu"])
+		}
+	})
+
+	t.Run("wg scheme alias with preshared_key and dual-stack addresses", func(t *testing.T) {
+		raw := "wg://priv-key-456@198.51.100.2:51820?public_key=peer-pub-456&address=172.16.0.2/32,2606:4700:110:8f81:85e8:5350:2ff1:d0cf/128&preshared_key=psk-456#wg-warp"
+		n, err := ParseURI(raw)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if n.Protocol != "wireguard" {
+			t.Fatalf("expected protocol wireguard, got %s", n.Protocol)
+		}
+		if n.Name != "wg-warp" {
+			t.Fatalf("expected name wg-warp, got %s", n.Name)
+		}
+
+		var m map[string]any
+		if err := json.Unmarshal(n.Outbound, &m); err != nil {
+			t.Fatalf("unmarshal outbound: %v", err)
+		}
+		if m["type"] != "wireguard" {
+			t.Fatalf("expected type wireguard, got %v", m["type"])
+		}
+		if m["server"] != "198.51.100.2" {
+			t.Fatalf("expected server 198.51.100.2, got %v", m["server"])
+		}
+		if m["server_port"] != float64(51820) {
+			t.Fatalf("expected server_port 51820, got %v", m["server_port"])
+		}
+		if m["private_key"] != "priv-key-456" {
+			t.Fatalf("expected private_key priv-key-456, got %v", m["private_key"])
+		}
+		if m["peer_public_key"] != "peer-pub-456" {
+			t.Fatalf("expected peer_public_key peer-pub-456, got %v", m["peer_public_key"])
+		}
+		if m["pre_shared_key"] != "psk-456" {
+			t.Fatalf("expected pre_shared_key psk-456, got %v", m["pre_shared_key"])
+		}
+		addrs, ok := m["local_address"].([]any)
+		if !ok || len(addrs) != 2 || addrs[0] != "172.16.0.2/32" || addrs[1] != "2606:4700:110:8f81:85e8:5350:2ff1:d0cf/128" {
+			t.Fatalf("expected dual-stack addresses, got %v", m["local_address"])
+		}
+		if _, ok := m["reserved"]; ok {
+			t.Fatalf("expected no reserved field, got %v", m["reserved"])
+		}
+		if m["mtu"] != float64(1420) {
+			t.Fatalf("expected default mtu 1420, got %v", m["mtu"])
+		}
+	})
+}
+

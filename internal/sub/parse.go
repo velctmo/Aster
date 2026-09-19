@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -203,6 +204,9 @@ func clashProxy(p map[string]any) (state.Node, error) {
 	if typ == "ss" {
 		typ = "shadowsocks"
 	}
+	if typ == "wg" {
+		typ = "wireguard"
+	}
 	return state.Node{ID: state.NewID(), Name: name, Protocol: typ, Outbound: ob}, nil
 }
 
@@ -230,6 +234,28 @@ func clashToOutbound(p map[string]any, typ, tag string) (json.RawMessage, error)
 		m["udp_fragment"] = true
 	}
 	switch mapType(typ) {
+	case "wireguard":
+		privKey := first(str(p["private-key"]), str(p["private_key"]))
+		peerPubKey := first(str(p["public-key"]), str(p["public_key"]), str(p["peer-public-key"]), str(p["peer_public_key"]))
+		m["private_key"] = privKey
+		m["peer_public_key"] = peerPubKey
+		if psk := first(str(p["preshared-key"]), str(p["preshared_key"]), str(p["pre-shared-key"]), str(p["pre_shared_key"])); psk != "" {
+			m["pre_shared_key"] = psk
+		}
+		localAddrs := parseWireGuardAddresses(p["ip"], p["ips"], p["local-address"], p["local_address"], p["address"])
+		if localAddrs == nil {
+			localAddrs = []string{}
+		}
+		m["local_address"] = localAddrs
+		reserved := parseWireGuardReserved(p["reserved"])
+		if len(reserved) > 0 {
+			m["reserved"] = reserved
+		}
+		mtu := intVal(p["mtu"])
+		if mtu == 0 {
+			mtu = 1420
+		}
+		m["mtu"] = mtu
 	case "shadowsocks":
 		m["method"] = str(p["cipher"])
 		m["password"] = str(p["password"])
@@ -296,6 +322,8 @@ func mapType(t string) string {
 		return "socks"
 	case "hysteria2", "hy2":
 		return "hysteria2"
+	case "wg", "wireguard":
+		return "wireguard"
 	default:
 		return strings.ToLower(t)
 	}
@@ -406,6 +434,8 @@ func ParseURI(line string) (state.Node, error) {
 		return hy2URI(u)
 	case "tuic":
 		return tuicURI(u)
+	case "wireguard", "wg":
+		return wireguardURI(line, u)
 	default:
 		return state.Node{}, fmt.Errorf("unknown scheme")
 	}
@@ -685,3 +715,209 @@ func first(a ...string) string {
 	}
 	return ""
 }
+
+func wireguardURI(line string, u *url.URL) (state.Node, error) {
+	name := ""
+	if u != nil && u.Fragment != "" {
+		name = u.Fragment
+	} else if fIdx := strings.Index(line, "#"); fIdx != -1 {
+		name, _ = url.QueryUnescape(line[fIdx+1:])
+	}
+
+	var privKey, hostPort string
+	idx := strings.Index(line, "://")
+	if idx != -1 {
+		rest := line[idx+3:]
+		if f := strings.Index(rest, "#"); f != -1 {
+			rest = rest[:f]
+		}
+		if q := strings.Index(rest, "?"); q != -1 {
+			rest = rest[:q]
+		}
+		if at := strings.LastIndex(rest, "@"); at != -1 {
+			privKey, _ = url.QueryUnescape(rest[:at])
+			hostPort = rest[at+1:]
+		} else {
+			hostPort = rest
+		}
+	} else if u != nil {
+		if u.User != nil {
+			privKey = u.User.Username()
+		}
+		hostPort = u.Host
+	}
+
+	var server string
+	var port int
+	if h, pStr, err := net.SplitHostPort(hostPort); err == nil {
+		server = h
+		port = intVal(pStr)
+	} else {
+		server = hostPort
+		port = 51820
+	}
+	if port == 0 {
+		port = 51820
+	}
+	if name == "" {
+		name = server
+	}
+
+	var q url.Values
+	if u != nil && len(u.Query()) > 0 {
+		q = u.Query()
+	} else if qIdx := strings.Index(line, "?"); qIdx != -1 {
+		qPart := line[qIdx+1:]
+		if fIdx := strings.Index(qPart, "#"); fIdx != -1 {
+			qPart = qPart[:fIdx]
+		}
+		q, _ = url.ParseQuery(qPart)
+	} else {
+		q = make(url.Values)
+	}
+
+	peerPubKey := first(q.Get("public_key"), q.Get("public-key"), q.Get("peer_public_key"), q.Get("peer-public-key"), q.Get("pubkey"), q.Get("pbk"))
+	if privKey == "" {
+		privKey = first(q.Get("private_key"), q.Get("private-key"))
+	}
+	psk := first(q.Get("preshared_key"), q.Get("preshared-key"), q.Get("pre_shared_key"), q.Get("pre-shared-key"), q.Get("psk"))
+
+	var addrVals []any
+	for _, a := range q["address"] {
+		addrVals = append(addrVals, a)
+	}
+	for _, a := range q["ip"] {
+		addrVals = append(addrVals, a)
+	}
+	for _, a := range q["ips"] {
+		addrVals = append(addrVals, a)
+	}
+	for _, a := range q["local_address"] {
+		addrVals = append(addrVals, a)
+	}
+	localAddrs := parseWireGuardAddresses(addrVals...)
+	if localAddrs == nil {
+		localAddrs = []string{}
+	}
+
+	reserved := parseWireGuardReserved(first(q.Get("reserved"), q.Get("reserved_bytes")))
+	mtu := intVal(q.Get("mtu"))
+	if mtu == 0 {
+		mtu = 1420
+	}
+
+	m := map[string]any{
+		"type":            "wireguard",
+		"tag":             name,
+		"server":          server,
+		"server_port":     port,
+		"local_address":   localAddrs,
+		"private_key":     privKey,
+		"peer_public_key": peerPubKey,
+		"mtu":             mtu,
+	}
+	if psk != "" {
+		m["pre_shared_key"] = psk
+	}
+	if len(reserved) > 0 {
+		m["reserved"] = reserved
+	}
+
+	b, _ := json.Marshal(m)
+	return state.Node{ID: state.NewID(), Name: name, Protocol: "wireguard", Outbound: b}, nil
+}
+
+func parseWireGuardAddresses(vals ...any) []string {
+	var addrs []string
+	seen := make(map[string]bool)
+
+	addOne := func(raw string) {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
+			return
+		}
+		raw = strings.TrimPrefix(raw, "[")
+		raw = strings.TrimSuffix(raw, "]")
+		var normalized string
+		if strings.Contains(raw, "/") {
+			normalized = raw
+		} else {
+			ip := net.ParseIP(raw)
+			if ip != nil && ip.To4() == nil && strings.Contains(raw, ":") {
+				normalized = raw + "/128"
+			} else if ip != nil && ip.To4() != nil {
+				normalized = raw + "/32"
+			} else if strings.Contains(raw, ":") {
+				normalized = raw + "/128"
+			} else {
+				normalized = raw + "/32"
+			}
+		}
+		if !seen[normalized] {
+			seen[normalized] = true
+			addrs = append(addrs, normalized)
+		}
+	}
+
+	for _, v := range vals {
+		if v == nil {
+			continue
+		}
+		switch val := v.(type) {
+		case string:
+			for _, part := range strings.Split(val, ",") {
+				addOne(part)
+			}
+		case []string:
+			for _, item := range val {
+				for _, part := range strings.Split(item, ",") {
+					addOne(part)
+				}
+			}
+		case []any:
+			for _, item := range val {
+				if s := str(item); s != "" {
+					for _, part := range strings.Split(s, ",") {
+						addOne(part)
+					}
+				}
+			}
+		}
+	}
+	return addrs
+}
+
+func parseWireGuardReserved(v any) []int {
+	if v == nil {
+		return nil
+	}
+	switch val := v.(type) {
+	case []int:
+		return val
+	case []any:
+		res := make([]int, 0, len(val))
+		for _, item := range val {
+			res = append(res, intVal(item))
+		}
+		return res
+	case string:
+		s := strings.TrimSpace(val)
+		s = strings.TrimPrefix(s, "[")
+		s = strings.TrimSuffix(s, "]")
+		if s == "" {
+			return nil
+		}
+		parts := strings.Split(s, ",")
+		res := make([]int, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				res = append(res, intVal(p))
+			}
+		}
+		return res
+	default:
+		return nil
+	}
+}
+
