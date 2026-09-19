@@ -114,6 +114,9 @@ public struct SurgeProLogsView: View {
     // 规则多态弹窗上下文
     @State private var addRuleContext: AddRuleContext? = nil
 
+    // 规则仿真测试器展开
+    @State private var showRuleEvaluator: Bool = false
+
     @MainActor
     public init(state: AsterState? = nil, loadsRealtimeData: Bool = true) {
         let actual = state ?? .shared
@@ -260,6 +263,15 @@ public struct SurgeProLogsView: View {
                     .frame(height: 52)
 
                 Divider().opacity(0.15)
+
+                if showRuleEvaluator {
+                    RuleEvaluatorBar()
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+
+                    Divider().opacity(0.15)
+                }
 
                 HStack(spacing: 0) {
                     mainTableArea
@@ -673,6 +685,29 @@ public struct SurgeProLogsView: View {
             )
             .frame(width: 220)
 
+            // ⚡️ 规则测试 切换按钮
+            Button(action: {
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    showRuleEvaluator.toggle()
+                }
+            }) {
+                HStack(spacing: 4) {
+                    Text("⚡️ 规则测试")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4.5)
+                .background(showRuleEvaluator ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.06))
+                .foregroundColor(showRuleEvaluator ? .accentColor : .primary)
+                .clipShape(.rect(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(showRuleEvaluator ? Color.accentColor.opacity(0.35) : Color.clear, lineWidth: 1)
+                )
+            }
+            .buttonStyle(.plain)
+            .help("展开或收起分流规则即时仿真测试条")
+
             // 清理按钮
             if !connectionStore.recentRequests.isEmpty {
                 Button(action: {
@@ -760,7 +795,7 @@ public struct SurgeProLogsView: View {
 
             // 黄金网格表头 (严格对齐下方行结构)
             HStack(spacing: 0) {
-                dataHeaderItem("状态", width: 24, alignment: .center)
+                dataHeaderItem("状态", width: 85, alignment: .leading)
                 dataHeaderItem("应用", width: 105)
                 dataHeaderItem("目标主机与分流路由", minWidth: 140)
                 dataHeaderItem("出站策略", width: 95)
@@ -886,11 +921,11 @@ public struct SurgeProLogsView: View {
             }
         }) {
             VStack(spacing: 4) {
-                // 行 1: 核心聚焦 (24 / 105 / min 140 / 95 / 80 / 55)
+                // 行 1: 核心聚焦 (85 / 105 / min 140 / 95 / 80 / 55)
                 HStack(spacing: 0) {
-                    // 1. 状态微光呼吸灯 (24pt)
-                    statusPulseDot(isClosed: isClosed)
-                        .frame(width: 24, alignment: .center)
+                    // 1. 状态微光与异常诊断徽标 (85pt)
+                    ConnectionDiagnosticBadge(conn: conn)
+                        .frame(width: 85, alignment: .leading)
                         .padding(.horizontal, 4)
 
                     // 2. 客户端应用 (105pt)
@@ -943,7 +978,7 @@ public struct SurgeProLogsView: View {
                 // 行 2: 辅助诊断参数 (对齐上方列结构，次要信息降噪)
                 HStack(spacing: 0) {
                     Color.clear
-                        .frame(width: 24)
+                        .frame(width: 85)
                         .padding(.horizontal, 4)
 
                     // 来源设备与 IP (105pt)
@@ -1108,6 +1143,32 @@ public struct SurgeProLogsView: View {
         return raw
     }
 
+    private func formatDuration(_ ms: Int64?) -> String {
+        guard let ms = ms else { return "--" }
+        if ms < 0 { return "0ms" }
+        if ms < 1000 {
+            return "\(ms)ms"
+        } else {
+            return String(format: "%.2fs", Double(ms) / 1000.0)
+        }
+    }
+
+    private func formatCloseReason(_ conn: ConnectionItem) -> String {
+        if let reason = conn.diagnostics?.closeReason {
+            switch reason {
+            case "rejected": return "⊘ 规则阻断"
+            case "timeout": return "⏱ 连接超时"
+            case "dns_failed": return "⚠ DNS 异常"
+            case "completed": return "✓ 正常完成"
+            case "active": return "● 活跃传输中"
+            default: return reason
+            }
+        }
+        if conn.isReject { return "⊘ 规则阻断" }
+        if conn.isClosed == true { return "✓ 已关闭" }
+        return "● 活跃传输中"
+    }
+
     private func copyToClipboard(_ text: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
@@ -1223,6 +1284,9 @@ public struct SurgeProLogsView: View {
                     }
 
                     inspectorSection("分流规则与出站") {
+                        RuleTracePipelineView(conn: conn)
+                            .padding(.vertical, 2)
+
                         inspectorProperty("命中规则", "\(conn.rule ?? "FINAL") \(conn.rulePayload ?? "")")
                         inspectorProperty("出站节点", policyStr)
                         inspectorProperty("完整链路", conn.chains?.joined(separator: " → ") ?? policyStr)
@@ -1230,6 +1294,10 @@ public struct SurgeProLogsView: View {
 
                     inspectorSection("流量与时序生命周期") {
                         inspectorProperty("连接状态", isClosed ? "已关闭终止" : "实时传输中")
+                        inspectorProperty("关闭原因", formatCloseReason(conn))
+                        inspectorProperty("持续时间", formatDuration(conn.diagnostics?.durationMs))
+                        inspectorProperty("瞬时下行", "\(Formatters.bytesString(conn.diagnostics?.speedIn ?? 0))/s")
+                        inspectorProperty("瞬时上行", "\(Formatters.bytesString(conn.diagnostics?.speedOut ?? 0))/s")
                         inspectorProperty("下载传输", Formatters.bytesString(conn.download))
                         inspectorProperty("上传传输", Formatters.bytesString(conn.upload))
                         inspectorProperty("请求时刻", conn.start ?? "--")
