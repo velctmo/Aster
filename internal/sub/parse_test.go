@@ -368,3 +368,231 @@ func TestParseWireGuard_URI(t *testing.T) {
 	})
 }
 
+func TestParseHysteria2_FullOptions(t *testing.T) {
+	t.Run("ClashYAML_FlatObfsAndBandwidth", func(t *testing.T) {
+		raw := `
+proxies:
+  - name: hy2-clash-flat
+    type: hysteria2
+    server: hy2.example.com
+    port: 8443
+    password: mypassword
+    obfs: salamander
+    obfs-password: secret
+    up: "100 Mbps"
+    down: "500 Mbps"
+    sni: example.com
+    skip-cert-verify: true
+`
+		r, err := Parse(raw)
+		if err != nil {
+			t.Fatalf("Parse error: %v", err)
+		}
+		if len(r.Nodes) != 1 {
+			t.Fatalf("expected 1 node, got %d", len(r.Nodes))
+		}
+		n := r.Nodes[0]
+		if n.Protocol != "hysteria2" {
+			t.Fatalf("expected protocol hysteria2, got %s", n.Protocol)
+		}
+		if n.Name != "hy2-clash-flat" {
+			t.Fatalf("expected name hy2-clash-flat, got %s", n.Name)
+		}
+
+		var m map[string]any
+		if err := json.Unmarshal(n.Outbound, &m); err != nil {
+			t.Fatalf("unmarshal outbound: %v", err)
+		}
+		if m["type"] != "hysteria2" {
+			t.Fatalf("expected type hysteria2, got %v", m["type"])
+		}
+		if m["server"] != "hy2.example.com" {
+			t.Fatalf("expected server hy2.example.com, got %v", m["server"])
+		}
+		if m["server_port"] != float64(8443) {
+			t.Fatalf("expected server_port 8443, got %v", m["server_port"])
+		}
+		if m["password"] != "mypassword" {
+			t.Fatalf("expected password mypassword, got %v", m["password"])
+		}
+		if m["up_mbps"] != float64(100) {
+			t.Fatalf("expected up_mbps 100, got %v", m["up_mbps"])
+		}
+		if m["down_mbps"] != float64(500) {
+			t.Fatalf("expected down_mbps 500, got %v", m["down_mbps"])
+		}
+		obfs, ok := m["obfs"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected obfs object, got %v", m["obfs"])
+		}
+		if obfs["type"] != "salamander" {
+			t.Fatalf("expected obfs type salamander, got %v", obfs["type"])
+		}
+		if obfs["password"] != "secret" {
+			t.Fatalf("expected obfs password secret, got %v", obfs["password"])
+		}
+		tls, ok := m["tls"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected tls object, got %v", m["tls"])
+		}
+		if tls["server_name"] != "example.com" {
+			t.Fatalf("expected tls server_name example.com, got %v", tls["server_name"])
+		}
+		if tls["insecure"] != true {
+			t.Fatalf("expected tls insecure true, got %v", tls["insecure"])
+		}
+	})
+
+	t.Run("ClashYAML_NestedObfs", func(t *testing.T) {
+		raw := `
+proxies:
+  - name: hy2-clash-nested
+    type: hysteria2
+    server: hy2.example.com
+    port: 8443
+    password: mypassword
+    obfs:
+      type: salamander
+      password: nestedsecret
+    up_mbps: 100
+    down_mbps: 500
+`
+		r, err := Parse(raw)
+		if err != nil {
+			t.Fatalf("Parse error: %v", err)
+		}
+		if len(r.Nodes) != 1 {
+			t.Fatalf("expected 1 node, got %d", len(r.Nodes))
+		}
+		var m map[string]any
+		if err := json.Unmarshal(r.Nodes[0].Outbound, &m); err != nil {
+			t.Fatalf("unmarshal outbound: %v", err)
+		}
+		obfs, ok := m["obfs"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected obfs object, got %v", m["obfs"])
+		}
+		if obfs["type"] != "salamander" || obfs["password"] != "nestedsecret" {
+			t.Fatalf("unexpected obfs: %v", obfs)
+		}
+		if m["up_mbps"] != float64(100) {
+			t.Fatalf("expected up_mbps 100, got %v", m["up_mbps"])
+		}
+		if m["down_mbps"] != float64(500) {
+			t.Fatalf("expected down_mbps 500, got %v", m["down_mbps"])
+		}
+	})
+
+	t.Run("URI_FullOptions", func(t *testing.T) {
+		raw := "hysteria2://password@example.com:443?obfs=salamander&obfs-password=secret&up_mbps=100&down_mbps=500&sni=example.com#hy2-node"
+		r, err := Parse(raw)
+		if err != nil {
+			t.Fatalf("Parse error: %v", err)
+		}
+		if len(r.Nodes) != 1 {
+			t.Fatalf("expected 1 node, got %d", len(r.Nodes))
+		}
+		n := r.Nodes[0]
+		if n.Protocol != "hysteria2" {
+			t.Fatalf("expected protocol hysteria2, got %s", n.Protocol)
+		}
+		if n.Name != "hy2-node" {
+			t.Fatalf("expected name hy2-node, got %s", n.Name)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(n.Outbound, &m); err != nil {
+			t.Fatalf("unmarshal outbound: %v", err)
+		}
+		if m["type"] != "hysteria2" {
+			t.Fatalf("expected type hysteria2, got %v", m["type"])
+		}
+		if m["server"] != "example.com" {
+			t.Fatalf("expected server example.com, got %v", m["server"])
+		}
+		if m["server_port"] != float64(443) {
+			t.Fatalf("expected server_port 443, got %v", m["server_port"])
+		}
+		if m["password"] != "password" {
+			t.Fatalf("expected password password, got %v", m["password"])
+		}
+		if m["up_mbps"] != float64(100) {
+			t.Fatalf("expected up_mbps 100, got %v", m["up_mbps"])
+		}
+		if m["down_mbps"] != float64(500) {
+			t.Fatalf("expected down_mbps 500, got %v", m["down_mbps"])
+		}
+		obfs, ok := m["obfs"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected obfs object, got %v", m["obfs"])
+		}
+		if obfs["type"] != "salamander" {
+			t.Fatalf("expected obfs type salamander, got %v", obfs["type"])
+		}
+		if obfs["password"] != "secret" {
+			t.Fatalf("expected obfs password secret, got %v", obfs["password"])
+		}
+		tls, ok := m["tls"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected tls object, got %v", m["tls"])
+		}
+		if tls["server_name"] != "example.com" {
+			t.Fatalf("expected tls server_name example.com, got %v", tls["server_name"])
+		}
+	})
+
+	t.Run("OmitEmptyObfsAndBandwidth", func(t *testing.T) {
+		raw := `
+proxies:
+  - name: hy2-simple
+    type: hysteria2
+    server: hy2.example.com
+    port: 443
+    password: mypassword
+`
+		r, err := Parse(raw)
+		if err != nil {
+			t.Fatalf("Parse error: %v", err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(r.Nodes[0].Outbound, &m); err != nil {
+			t.Fatalf("unmarshal outbound: %v", err)
+		}
+		if _, ok := m["obfs"]; ok {
+			t.Fatalf("expected no obfs, got %v", m["obfs"])
+		}
+		if _, ok := m["up_mbps"]; ok {
+			t.Fatalf("expected no up_mbps, got %v", m["up_mbps"])
+		}
+		if _, ok := m["down_mbps"]; ok {
+			t.Fatalf("expected no down_mbps, got %v", m["down_mbps"])
+		}
+	})
+
+	t.Run("BandwidthStringVariations", func(t *testing.T) {
+		raw := `
+proxies:
+  - name: hy2-bw
+    type: hysteria2
+    server: hy2.example.com
+    port: 443
+    password: mypassword
+    up: "100 mbps"
+    down: "500MB/s"
+`
+		r, err := Parse(raw)
+		if err != nil {
+			t.Fatalf("Parse error: %v", err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(r.Nodes[0].Outbound, &m); err != nil {
+			t.Fatalf("unmarshal outbound: %v", err)
+		}
+		if m["up_mbps"] != float64(100) {
+			t.Fatalf("expected up_mbps 100, got %v", m["up_mbps"])
+		}
+		if m["down_mbps"] != float64(500) {
+			t.Fatalf("expected down_mbps 500, got %v", m["down_mbps"])
+		}
+	})
+}
+

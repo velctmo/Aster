@@ -292,6 +292,15 @@ func clashToOutbound(p map[string]any, typ, tag string) (json.RawMessage, error)
 			m["password"] = auth
 		}
 		applyTLS(m, p, true)
+		if obfs := parseHysteria2Obfs(p); obfs != nil {
+			m["obfs"] = obfs
+		}
+		if up := parseBandwidthMbps(getFirst(p, "up_mbps", "up-mbps", "up")); up > 0 {
+			m["up_mbps"] = up
+		}
+		if down := parseBandwidthMbps(getFirst(p, "down_mbps", "down-mbps", "down")); down > 0 {
+			m["down_mbps"] = down
+		}
 	case "tuic":
 		m["uuid"] = str(p["uuid"])
 		m["password"] = str(p["password"])
@@ -624,16 +633,166 @@ func vmessURI(line string) (state.Node, error) {
 	return state.Node{ID: state.NewID(), Name: name, Protocol: "vmess", Outbound: raw}, nil
 }
 
+var bandwidthRe = regexp.MustCompile(`(?i)^([0-9]+(?:\.[0-9]+)?)\s*([a-z/]*)$`)
+
+func parseBandwidthMbps(v any) int {
+	if v == nil {
+		return 0
+	}
+	switch val := v.(type) {
+	case int:
+		if val > 0 {
+			return val
+		}
+		return 0
+	case int64:
+		if val > 0 {
+			return int(val)
+		}
+		return 0
+	case float64:
+		if val > 0 {
+			return int(val)
+		}
+		return 0
+	case string:
+		s := strings.TrimSpace(val)
+		if s == "" {
+			return 0
+		}
+		matches := bandwidthRe.FindStringSubmatch(s)
+		if len(matches) < 2 {
+			return 0
+		}
+		num, err := strconv.ParseFloat(matches[1], 64)
+		if err != nil || num <= 0 {
+			return 0
+		}
+		unit := strings.ToLower(strings.TrimSpace(matches[2]))
+		switch {
+		case strings.HasPrefix(unit, "g"):
+			return int(num * 1000)
+		case strings.HasPrefix(unit, "k"):
+			return int(num / 1000)
+		default:
+			return int(num)
+		}
+	default:
+		return 0
+	}
+}
+
+func getFirst(p map[string]any, keys ...string) any {
+	for _, k := range keys {
+		if v, ok := p[k]; ok && v != nil {
+			return v
+		}
+	}
+	return nil
+}
+
+func parseHysteria2Obfs(p map[string]any) map[string]any {
+	obfsVal, ok := p["obfs"]
+	if !ok || obfsVal == nil {
+		return nil
+	}
+	switch v := obfsVal.(type) {
+	case map[string]any:
+		obfsType := str(v["type"])
+		if obfsType == "" {
+			obfsType = "salamander"
+		}
+		if strings.ToLower(obfsType) == "none" {
+			return nil
+		}
+		obfsPass := first(str(v["password"]), str(v["obfs-password"]), str(v["obfs_password"]), str(p["obfs-password"]), str(p["obfs_password"]))
+		return map[string]any{
+			"type":     obfsType,
+			"password": obfsPass,
+		}
+	case map[any]any:
+		vMap := make(map[string]any)
+		for k, val := range v {
+			vMap[fmt.Sprint(k)] = val
+		}
+		obfsType := str(vMap["type"])
+		if obfsType == "" {
+			obfsType = "salamander"
+		}
+		if strings.ToLower(obfsType) == "none" {
+			return nil
+		}
+		obfsPass := first(str(vMap["password"]), str(vMap["obfs-password"]), str(vMap["obfs_password"]), str(p["obfs-password"]), str(p["obfs_password"]))
+		return map[string]any{
+			"type":     obfsType,
+			"password": obfsPass,
+		}
+	case string:
+		obfsType := strings.TrimSpace(v)
+		if obfsType == "" || strings.ToLower(obfsType) == "none" {
+			return nil
+		}
+		obfsPass := first(str(p["obfs-password"]), str(p["obfs_password"]))
+		return map[string]any{
+			"type":     obfsType,
+			"password": obfsPass,
+		}
+	case bool:
+		if !v {
+			return nil
+		}
+		obfsPass := first(str(p["obfs-password"]), str(p["obfs_password"]))
+		return map[string]any{
+			"type":     "salamander",
+			"password": obfsPass,
+		}
+	default:
+		return nil
+	}
+}
+
 func hy2URI(u *url.URL) (state.Node, error) {
+	q := u.Query()
 	name := first(u.Fragment, u.Hostname())
-	pw := u.User.Username()
+	pw, _ := u.User.Password()
+	if pw == "" {
+		pw = u.User.Username()
+	}
+	port := intVal(u.Port())
+	if port == 0 {
+		port = 443
+	}
+	tlsMap := map[string]any{
+		"enabled":     true,
+		"server_name": first(q.Get("sni"), q.Get("peer"), q.Get("servername"), u.Hostname()),
+	}
+	if q.Get("insecure") == "1" || q.Get("insecure") == "true" || q.Get("allowInsecure") == "1" || q.Get("skip-cert-verify") == "1" || q.Get("skip-cert-verify") == "true" {
+		tlsMap["insecure"] = true
+	}
+	if alpn := q.Get("alpn"); alpn != "" {
+		tlsMap["alpn"] = strings.Split(alpn, ",")
+	}
 	m := map[string]any{
 		"type":        "hysteria2",
 		"tag":         name,
 		"server":      u.Hostname(),
-		"server_port": intVal(u.Port()),
+		"server_port": port,
 		"password":    pw,
-		"tls":         map[string]any{"enabled": true, "server_name": first(u.Query().Get("sni"), u.Hostname())},
+		"tls":         tlsMap,
+	}
+	obfsType := first(q.Get("obfs"), q.Get("obfs-type"), q.Get("obfs_type"))
+	if obfsType != "" && strings.ToLower(obfsType) != "none" {
+		obfsPass := first(q.Get("obfs-password"), q.Get("obfs_password"), q.Get("obfs-param"), q.Get("obfs_param"))
+		m["obfs"] = map[string]any{
+			"type":     obfsType,
+			"password": obfsPass,
+		}
+	}
+	if up := parseBandwidthMbps(first(q.Get("up_mbps"), q.Get("up-mbps"), q.Get("up"))); up > 0 {
+		m["up_mbps"] = up
+	}
+	if down := parseBandwidthMbps(first(q.Get("down_mbps"), q.Get("down-mbps"), q.Get("down"))); down > 0 {
+		m["down_mbps"] = down
 	}
 	b, _ := json.Marshal(m)
 	return state.Node{ID: state.NewID(), Name: name, Protocol: "hysteria2", Outbound: b}, nil
