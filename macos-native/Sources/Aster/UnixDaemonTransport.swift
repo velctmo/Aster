@@ -205,6 +205,20 @@ enum UnixDaemonTransport {
 
 final class UnixWebSocket: @unchecked Sendable {
     typealias ReceiveHandler = (Result<URLSessionWebSocketTask.Message, Error>) -> Void
+
+    // The websocket callback originates on Network.framework's queue but is
+    // consumed by MainActor-bound SwiftUI state. This container is the single,
+    // immutable value intentionally passed between those queues; delivery is
+    // always performed on the main queue below.
+    private final class ReceiveDelivery: @unchecked Sendable {
+        let callback: ReceiveHandler
+        let result: Result<URLSessionWebSocketTask.Message, Error>
+
+        init(_ callback: @escaping ReceiveHandler, _ result: Result<URLSessionWebSocketTask.Message, Error>) {
+            self.callback = callback
+            self.result = result
+        }
+    }
     private let path: String
     private let token: String
     private var connection: NWConnection?
@@ -366,11 +380,12 @@ final class UnixWebSocket: @unchecked Sendable {
     }
 
     private func deliverOnMain(_ callback: @escaping ReceiveHandler, _ result: Result<URLSessionWebSocketTask.Message, Error>) {
+        let delivery = ReceiveDelivery(callback, result)
         if Thread.isMainThread {
-            callback(result)
+            delivery.callback(delivery.result)
         } else {
             DispatchQueue.main.async {
-                callback(result)
+                delivery.callback(delivery.result)
             }
         }
     }
