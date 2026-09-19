@@ -201,11 +201,13 @@ func clashProxy(p map[string]any) (state.Node, error) {
 	if err != nil {
 		return state.Node{}, err
 	}
-	if typ == "ss" {
+	switch typ {
+	case "ss":
 		typ = "shadowsocks"
-	}
-	if typ == "wg" {
+	case "wg":
 		typ = "wireguard"
+	case "shadowtls", "shadow-tls":
+		typ = "shadowtls"
 	}
 	return state.Node{ID: state.NewID(), Name: name, Protocol: typ, Outbound: ob}, nil
 }
@@ -325,6 +327,25 @@ func clashToOutbound(p map[string]any, typ, tag string) (json.RawMessage, error)
 	case "anytls":
 		m["password"] = str(p["password"])
 		applyTLS(m, p, true)
+	case "shadowtls":
+		m["password"] = str(p["password"])
+		ver := intVal(getFirst(p, "version"))
+		if ver == 0 {
+			ver = 3
+		}
+		m["version"] = ver
+		if strict := getFirst(p, "strict-mode", "strict_mode"); strict != nil {
+			m["strict_mode"] = boolVal(strict)
+		}
+		pTLS := p
+		if sni := first(str(p["sni"]), str(p["servername"]), str(p["host"])); sni != "" {
+			pTLS = make(map[string]any, len(p)+1)
+			for k, v := range p {
+				pTLS[k] = v
+			}
+			pTLS["sni"] = sni
+		}
+		applyTLS(m, pTLS, true)
 	case "http", "socks", "socks5":
 		if mapType(typ) == "socks5" {
 			m["type"] = "socks"
@@ -350,6 +371,8 @@ func mapType(t string) string {
 		return "hysteria2"
 	case "wg", "wireguard":
 		return "wireguard"
+	case "shadowtls", "shadow-tls":
+		return "shadowtls"
 	default:
 		return strings.ToLower(t)
 	}

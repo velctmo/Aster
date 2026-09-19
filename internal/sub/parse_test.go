@@ -742,3 +742,127 @@ proxies:
 	})
 }
 
+func TestParseShadowTLS(t *testing.T) {
+	t.Run("ClashYAML Standard", func(t *testing.T) {
+		raw := `
+proxies:
+  - name: st-node
+    type: shadowtls
+    server: 1.2.3.4
+    port: 443
+    password: "secret"
+    version: 3
+    sni: gateway.icloud.com
+`
+		r, err := Parse(raw)
+		if err != nil {
+			t.Fatalf("Parse error: %v", err)
+		}
+		if len(r.Nodes) != 1 {
+			t.Fatalf("expected 1 node, got %d", len(r.Nodes))
+		}
+		node := r.Nodes[0]
+		if node.Protocol != "shadowtls" {
+			t.Fatalf("expected protocol shadowtls, got %s", node.Protocol)
+		}
+		if node.Name != "st-node" {
+			t.Fatalf("expected name st-node, got %s", node.Name)
+		}
+
+		var m map[string]any
+		if err := json.Unmarshal(node.Outbound, &m); err != nil {
+			t.Fatalf("unmarshal outbound: %v", err)
+		}
+		if m["type"] != "shadowtls" {
+			t.Fatalf("expected type shadowtls, got %v", m["type"])
+		}
+		if m["tag"] != "st-node" {
+			t.Fatalf("expected tag st-node, got %v", m["tag"])
+		}
+		if m["server"] != "1.2.3.4" {
+			t.Fatalf("expected server 1.2.3.4, got %v", m["server"])
+		}
+		if m["server_port"] != float64(443) {
+			t.Fatalf("expected server_port 443, got %v", m["server_port"])
+		}
+		if m["version"] != float64(3) {
+			t.Fatalf("expected version 3, got %v", m["version"])
+		}
+		if m["password"] != "secret" {
+			t.Fatalf("expected password secret, got %v", m["password"])
+		}
+		tls, ok := m["tls"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected tls map, got %v", m["tls"])
+		}
+		if tls["enabled"] != true {
+			t.Fatalf("expected tls enabled true, got %v", tls["enabled"])
+		}
+		if tls["server_name"] != "gateway.icloud.com" {
+			t.Fatalf("expected tls server_name gateway.icloud.com, got %v", tls["server_name"])
+		}
+	})
+
+	t.Run("ClashYAML Variations", func(t *testing.T) {
+		raw := `
+proxies:
+  - name: st-opts
+    type: shadowtls
+    server: 2.3.4.5
+    port: 8443
+    password: "secret2"
+    servername: server.apple.com
+    strict-mode: true
+`
+		r, err := Parse(raw)
+		if err != nil {
+			t.Fatalf("Parse error: %v", err)
+		}
+		if len(r.Nodes) != 1 {
+			t.Fatalf("expected 1 node, got %d", len(r.Nodes))
+		}
+		var m map[string]any
+		if err := json.Unmarshal(r.Nodes[0].Outbound, &m); err != nil {
+			t.Fatalf("unmarshal outbound: %v", err)
+		}
+		if m["version"] != float64(3) {
+			t.Fatalf("expected default version 3, got %v", m["version"])
+		}
+		if m["strict_mode"] != true {
+			t.Fatalf("expected strict_mode true, got %v", m["strict_mode"])
+		}
+		tls := m["tls"].(map[string]any)
+		if tls["server_name"] != "server.apple.com" {
+			t.Fatalf("expected tls server_name server.apple.com, got %v", tls["server_name"])
+		}
+	})
+
+	t.Run("ClashYAML Host Fallback and String Version", func(t *testing.T) {
+		raw := `
+proxies:
+  - name: st-host
+    type: shadowtls
+    server: 3.4.5.6
+    port: 443
+    password: "pwd"
+    version: "2"
+    host: domain.example.com
+`
+		r, err := Parse(raw)
+		if err != nil {
+			t.Fatalf("Parse error: %v", err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(r.Nodes[0].Outbound, &m); err != nil {
+			t.Fatalf("unmarshal outbound: %v", err)
+		}
+		if m["version"] != float64(2) {
+			t.Fatalf("expected version 2, got %v", m["version"])
+		}
+		tls := m["tls"].(map[string]any)
+		if tls["server_name"] != "domain.example.com" {
+			t.Fatalf("expected tls server_name domain.example.com, got %v", tls["server_name"])
+		}
+	})
+}
+
