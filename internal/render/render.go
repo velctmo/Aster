@@ -143,6 +143,7 @@ func Config(f state.File, dir string) ([]byte, error) {
 		"interrupt_exist_connections": false,
 	})
 	nodeServersMap := make(map[string]struct{})
+	var endpoints []any
 	for _, n := range nodes {
 		if n.Disabled {
 			continue
@@ -158,6 +159,22 @@ func Config(f state.File, dir string) ([]byte, error) {
 			}
 		}
 		m["tag"] = n.Tag
+		typ, _ := m["type"].(string)
+		if typ == "wireguard" {
+			endpoints = append(endpoints, buildWireGuardEndpoint(m, n.Tag))
+			continue
+		}
+		if typ == "tuic" {
+			if cc, ok := m["congestion_controller"].(string); ok && cc != "" {
+				if _, has := m["congestion_control"]; !has {
+					m["congestion_control"] = cc
+				}
+				delete(m, "congestion_controller")
+			}
+		}
+		if typ == "shadowtls" {
+			delete(m, "strict_mode")
+		}
 		outbounds = append(outbounds, m)
 	}
 	var nodeServers []string
@@ -249,6 +266,9 @@ func Config(f state.File, dir string) ([]byte, error) {
 				"store_fakeip": true,
 			},
 		},
+	}
+	if len(endpoints) > 0 {
+		cfg["endpoints"] = endpoints
 	}
 	applySelectorDefaults(cfg, f.Selected, f.SelectorNow)
 	baseJSON, err := json.MarshalIndent(cfg, "", "  ")
@@ -758,4 +778,47 @@ func setTag(raw json.RawMessage, tag string) json.RawMessage {
 	m["tag"] = tag
 	b, _ := json.Marshal(m)
 	return b
+}
+
+func buildWireGuardEndpoint(m map[string]any, tag string) map[string]any {
+	peer := map[string]any{
+		"allowed_ips": []string{"0.0.0.0/0", "::/0"},
+	}
+	if srv, ok := m["server"].(string); ok && srv != "" {
+		peer["address"] = srv
+	}
+	if port, ok := m["server_port"].(float64); ok && port > 0 {
+		peer["port"] = int(port)
+	} else if port, ok := m["server_port"].(int); ok && port > 0 {
+		peer["port"] = port
+	}
+	if pubKey, ok := m["peer_public_key"].(string); ok && pubKey != "" {
+		peer["public_key"] = pubKey
+	}
+	if psk, ok := m["pre_shared_key"].(string); ok && psk != "" {
+		peer["pre_shared_key"] = psk
+	}
+	if reserved, ok := m["reserved"]; ok && reserved != nil {
+		peer["reserved"] = reserved
+	}
+
+	ep := map[string]any{
+		"type":  "wireguard",
+		"tag":   tag,
+		"peers": []any{peer},
+	}
+	if privKey, ok := m["private_key"].(string); ok && privKey != "" {
+		ep["private_key"] = privKey
+	}
+	if localAddrs, ok := m["local_address"]; ok && localAddrs != nil {
+		ep["address"] = localAddrs
+	}
+	if mtu, ok := m["mtu"].(float64); ok && mtu > 0 {
+		ep["mtu"] = int(mtu)
+	} else if mtu, ok := m["mtu"].(int); ok && mtu > 0 {
+		ep["mtu"] = mtu
+	} else {
+		ep["mtu"] = 1420
+	}
+	return ep
 }

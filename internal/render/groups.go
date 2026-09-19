@@ -31,14 +31,20 @@ type outboundMeta struct {
 func Groups(config []byte) ([]Group, error) {
 	var document struct {
 		Outbounds []outboundMeta `json:"outbounds"`
+		Endpoints []outboundMeta `json:"endpoints"`
 	}
 	if err := json.Unmarshal(config, &document); err != nil {
 		return nil, fmt.Errorf("配置不是有效 JSON: %w", err)
 	}
-	byTag := make(map[string]outboundMeta, len(document.Outbounds))
+	byTag := make(map[string]outboundMeta, len(document.Outbounds)+len(document.Endpoints))
 	for _, outbound := range document.Outbounds {
 		if outbound.Tag != "" {
 			byTag[outbound.Tag] = outbound
+		}
+	}
+	for _, ep := range document.Endpoints {
+		if ep.Tag != "" {
+			byTag[ep.Tag] = ep
 		}
 	}
 	groups := []Group{}
@@ -74,6 +80,12 @@ func Groups(config []byte) ([]Group, error) {
 				continue
 			}
 			leaves = append(leaves, outbound.Tag)
+		}
+		for _, ep := range document.Endpoints {
+			if ep.Tag == "" || isStrategyOutbound(ep.Type) || isSpecialOutbound(ep.Type) {
+				continue
+			}
+			leaves = append(leaves, ep.Tag)
 		}
 		if len(leaves) > 0 {
 			members := append([]string{"direct"}, leaves...)

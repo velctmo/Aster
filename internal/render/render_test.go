@@ -820,3 +820,234 @@ func TestConfigScriptFailSafeProtections(t *testing.T) {
 		t.Fatal("fail-safe did not inject proxy selector alias")
 	}
 }
+
+func TestConfigNewProtocols_TransformAndGroups(t *testing.T) {
+	f := state.DefaultFile()
+	p := f.ActiveProfile()
+	if p == nil {
+		t.Fatal("need active profile")
+	}
+	f.Profiles[0].ManualNodes = []state.Node{
+		{
+			ID: "wg-1", Name: "wg-node", Protocol: "wireguard",
+			Outbound: json.RawMessage(`{"type":"wireguard","server":"198.51.100.1","server_port":51820,"private_key":"priv","peer_public_key":"pub","local_address":["172.16.0.2/32"],"reserved":[0,0,0],"mtu":1420}`),
+		},
+		{
+			ID: "hy2-1", Name: "hy2-node", Protocol: "hysteria2",
+			Outbound: json.RawMessage(`{"type":"hysteria2","server":"hy2.example.com","server_port":8443,"password":"pass","up_mbps":100,"down_mbps":500,"obfs":{"type":"salamander","password":"sec"},"tls":{"enabled":true,"server_name":"example.com"}}`),
+		},
+		{
+			ID: "tuic-1", Name: "tuic-node", Protocol: "tuic",
+			Outbound: json.RawMessage(`{"type":"tuic","server":"example.com","server_port":8443,"uuid":"11111111-1111-1111-1111-111111111111","password":"pass","congestion_controller":"bbr","congestion_control":"bbr","udp_relay_mode":"native","zero_rtt_handshake":true,"heartbeat":"10s","tls":{"enabled":true,"server_name":"example.com"}}`),
+		},
+		{
+			ID: "st-1", Name: "st-node", Protocol: "shadowtls",
+			Outbound: json.RawMessage(`{"type":"shadowtls","server":"1.2.3.4","server_port":443,"version":3,"password":"pass","strict_mode":true,"tls":{"enabled":true,"server_name":"gateway.icloud.com"}}`),
+		},
+	}
+
+	dataDir := t.TempDir()
+	b, err := Config(f, dataDir)
+	if err != nil {
+		t.Fatalf("Config failed: %v", err)
+	}
+
+	var parsed struct {
+		Endpoints []map[string]any `json:"endpoints"`
+		Outbounds []map[string]any `json:"outbounds"`
+	}
+	if err := json.Unmarshal(b, &parsed); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+
+	// 1. Verify WireGuard is in endpoints, not outbounds
+	if len(parsed.Endpoints) != 1 {
+		t.Fatalf("expected 1 endpoint, got %d", len(parsed.Endpoints))
+	}
+	ep := parsed.Endpoints[0]
+	if ep["type"] != "wireguard" || ep["tag"] != "wg-node" {
+		t.Fatalf("unexpected endpoint: %+v", ep)
+	}
+	peers, ok := ep["peers"].([]any)
+	if !ok || len(peers) != 1 {
+		t.Fatalf("expected 1 peer, got %+v", ep["peers"])
+	}
+	peer := peers[0].(map[string]any)
+	if peer["address"] != "198.51.100.1" || peer["port"] != float64(51820) || peer["public_key"] != "pub" {
+		t.Fatalf("unexpected peer config: %+v", peer)
+	}
+
+	// Check WireGuard is not in outbounds
+	for _, ob := range parsed.Outbounds {
+		if ob["type"] == "wireguard" {
+			t.Fatalf("wireguard must not be in outbounds: %+v", ob)
+		}
+	}
+
+	// 2. Verify TUIC has congestion_control and NOT congestion_controller
+	var tuicFound bool
+	for _, ob := range parsed.Outbounds {
+		if ob["type"] == "tuic" {
+			tuicFound = true
+			if ob["congestion_control"] != "bbr" {
+				t.Fatalf("expected congestion_control bbr, got %v", ob["congestion_control"])
+			}
+			if _, has := ob["congestion_controller"]; has {
+				t.Fatalf("congestion_controller should be sanitized out: %+v", ob)
+			}
+		}
+	}
+	if !tuicFound {
+		t.Fatal("tuic outbound not found")
+	}
+
+	// 3. Verify ShadowTLS does not have strict_mode
+	var stFound bool
+	for _, ob := range parsed.Outbounds {
+		if ob["type"] == "shadowtls" {
+			stFound = true
+			if _, has := ob["strict_mode"]; has {
+				t.Fatalf("strict_mode must be sanitized out: %+v", ob)
+			}
+		}
+	}
+	if !stFound {
+		t.Fatal("shadowtls outbound not found")
+	}
+
+	// 4. Verify Groups includes all 4 nodes in proxy selector leaves
+	groups, err := Groups(b)
+	if err != nil {
+		t.Fatalf("Groups failed: %v", err)
+	}
+	if len(groups) == 0 {
+		t.Fatal("expected at least 1 group")
+	}
+	proxyGroup := groups[0]
+	expectedLeaves := map[string]bool{
+		"wg-node":   false,
+		"hy2-node":  false,
+		"tuic-node": false,
+		"st-node":   false,
+	}
+	for _, leaf := range proxyGroup.LeafTags {
+		if _, ok := expectedLeaves[leaf]; ok {
+			expectedLeaves[leaf] = true
+		}
+	}
+	for tag, found := range expectedLeaves {
+		if !found {
+			t.Fatalf("leaf tag %s was not found in proxy group leaves: %v", tag, proxyGroup.LeafTags)
+		}
+	}
+}
+
+func TestSingBoxCheck_AllNewProtocols(t *testing.T) {
+	bin, err := exec.LookPath("sing-box")
+	if err != nil {
+		cands := []string{"/opt/homebrew/bin/sing-box", "/usr/local/bin/sing-box"}
+		for _, c := range cands {
+			if st, statErr := os.Stat(c); statErr == nil && !st.IsDir() {
+				bin = c
+				err = nil
+				break
+			}
+		}
+	}
+	if err != nil {
+		t.Skip("sing-box binary not found, skipping check")
+	}
+
+	testCfg := map[string]any{
+		"endpoints": []any{
+			map[string]any{
+				"type":        "wireguard",
+				"tag":         "wg-node",
+				"address":     []string{"172.16.0.2/32"},
+				"private_key": "a2V5MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODk=",
+				"peers": []any{
+					map[string]any{
+						"address":     "198.51.100.1",
+						"port":        51820,
+						"public_key":  "a2V5MTIzNDU2Nzg5MDEyMzQ1Njc4OTAxMjM0NTY3ODk=",
+						"allowed_ips": []string{"0.0.0.0/0", "::/0"},
+						"reserved":    []int{0, 0, 0},
+					},
+				},
+				"mtu": 1420,
+			},
+		},
+		"outbounds": []any{
+			map[string]any{
+				"type": "direct",
+				"tag":  "direct",
+			},
+			map[string]any{
+				"type":      "selector",
+				"tag":       "proxy",
+				"outbounds": []string{"wg-node", "hy2-node", "tuic-node", "st-node"},
+			},
+			map[string]any{
+				"type":        "hysteria2",
+				"tag":         "hy2-node",
+				"server":      "hy2.example.com",
+				"server_port": 8443,
+				"password":    "mypassword",
+				"up_mbps":     100,
+				"down_mbps":   500,
+				"obfs": map[string]any{
+					"type":     "salamander",
+					"password": "secret",
+				},
+				"tls": map[string]any{
+					"enabled":     true,
+					"server_name": "example.com",
+				},
+			},
+			map[string]any{
+				"type":               "tuic",
+				"tag":                "tuic-node",
+				"server":             "example.com",
+				"server_port":        8443,
+				"uuid":               "11111111-1111-1111-1111-111111111111",
+				"password":           "my-pass",
+				"congestion_control": "bbr",
+				"udp_relay_mode":     "native",
+				"zero_rtt_handshake": true,
+				"heartbeat":          "10s",
+				"tls": map[string]any{
+					"enabled":     true,
+					"server_name": "example.com",
+				},
+			},
+			map[string]any{
+				"type":        "shadowtls",
+				"tag":         "st-node",
+				"server":      "1.2.3.4",
+				"server_port": 443,
+				"version":     3,
+				"password":    "secret",
+				"tls": map[string]any{
+					"enabled":     true,
+					"server_name": "gateway.icloud.com",
+				},
+			},
+		},
+	}
+
+	b, err := json.Marshal(testCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tmpFile := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(tmpFile, b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(bin, "check", "-c", tmpFile)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("sing-box check failed: %v, output: %s", err, string(out))
+	}
+}

@@ -110,8 +110,8 @@ func TestParseTUIC(t *testing.T) {
 		if err := json.Unmarshal(r.Nodes[0].Outbound, &m); err != nil {
 			t.Fatal(err)
 		}
-		if m["congestion_controller"] != "bbr" {
-			t.Fatalf("expected congestion_controller bbr, got %v", m["congestion_controller"])
+		if m["congestion_controller"] != "bbr" || m["congestion_control"] != "bbr" {
+			t.Fatalf("expected congestion_controller/control bbr, got %v / %v", m["congestion_controller"], m["congestion_control"])
 		}
 		if m["udp_relay_mode"] != "native" {
 			t.Fatalf("expected udp_relay_mode native, got %v", m["udp_relay_mode"])
@@ -138,8 +138,8 @@ func TestParseTUIC(t *testing.T) {
 		if err := json.Unmarshal(r.Nodes[0].Outbound, &m); err != nil {
 			t.Fatal(err)
 		}
-		if m["congestion_controller"] != "cubic" {
-			t.Fatalf("expected congestion_controller cubic, got %v", m["congestion_controller"])
+		if m["congestion_controller"] != "cubic" || m["congestion_control"] != "cubic" {
+			t.Fatalf("expected congestion_controller/control cubic, got %v / %v", m["congestion_controller"], m["congestion_control"])
 		}
 		if m["udp_relay_mode"] != "quic" {
 			t.Fatalf("expected udp_relay_mode quic, got %v", m["udp_relay_mode"])
@@ -176,8 +176,8 @@ proxies:
 		if err := json.Unmarshal(r.Nodes[0].Outbound, &m); err != nil {
 			t.Fatal(err)
 		}
-		if m["congestion_controller"] != "bbr" {
-			t.Fatalf("expected congestion_controller bbr, got %v", m["congestion_controller"])
+		if m["congestion_controller"] != "bbr" || m["congestion_control"] != "bbr" {
+			t.Fatalf("expected congestion_controller/control bbr, got %v / %v", m["congestion_controller"], m["congestion_control"])
 		}
 		if m["udp_relay_mode"] != "native" {
 			t.Fatalf("expected udp_relay_mode native, got %v", m["udp_relay_mode"])
@@ -218,8 +218,8 @@ proxies:
 		if err := json.Unmarshal(r.Nodes[0].Outbound, &m); err != nil {
 			t.Fatal(err)
 		}
-		if m["congestion_controller"] != "cubic" {
-			t.Fatalf("expected congestion_controller cubic, got %v", m["congestion_controller"])
+		if m["congestion_controller"] != "cubic" || m["congestion_control"] != "cubic" {
+			t.Fatalf("expected congestion_controller/control cubic, got %v / %v", m["congestion_controller"], m["congestion_control"])
 		}
 		if m["udp_relay_mode"] != "quic" {
 			t.Fatalf("expected udp_relay_mode quic, got %v", m["udp_relay_mode"])

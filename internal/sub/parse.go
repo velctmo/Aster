@@ -306,8 +306,9 @@ func clashToOutbound(p map[string]any, typ, tag string) (json.RawMessage, error)
 	case "tuic":
 		m["uuid"] = first(str(p["uuid"]), str(p["token"]))
 		m["password"] = str(p["password"])
-		if cc := strings.ToLower(str(getFirst(p, "congestion-controller", "congestion_controller"))); cc != "" {
+		if cc := strings.ToLower(str(getFirst(p, "congestion-controller", "congestion_controller", "congestion-control", "congestion_control"))); cc != "" {
 			m["congestion_controller"] = cc
+			m["congestion_control"] = cc
 		}
 		if urm := strings.ToLower(str(getFirst(p, "udp-relay-mode", "udp_relay_mode"))); urm != "" {
 			m["udp_relay_mode"] = urm
@@ -648,6 +649,7 @@ func tuicURI(u *url.URL) (state.Node, error) {
 	}
 	if cc := strings.ToLower(first(q.Get("congestion_controller"), q.Get("congestion-controller"), q.Get("congestion_control"), q.Get("congestion-control"))); cc != "" {
 		m["congestion_controller"] = cc
+		m["congestion_control"] = cc
 	}
 	if urm := strings.ToLower(first(q.Get("udp_relay_mode"), q.Get("udp-relay-mode"))); urm != "" {
 		m["udp_relay_mode"] = urm
