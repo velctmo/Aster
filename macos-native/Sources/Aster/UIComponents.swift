@@ -508,6 +508,61 @@ public struct ActionBadge: View {
     }
 }
 
+// MARK: - 协议专属色彩微标组件
+public struct ProtocolBadge: View {
+    public var proto: String
+    public var isSelected: Bool
+
+    public init(proto: String, isSelected: Bool = false) {
+        self.proto = proto
+        self.isSelected = isSelected
+    }
+
+    public var body: some View {
+        let (color, text) = protocolMeta(proto)
+        Text(text)
+            .font(.system(size: 9, weight: .bold, design: .monospaced))
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(isSelected ? color.opacity(0.20) : color.opacity(0.10))
+            .foregroundStyle(isSelected ? color : color.opacity(0.95))
+            .clipShape(.rect(cornerRadius: 4))
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .strokeBorder(isSelected ? color.opacity(0.40) : color.opacity(0.18), lineWidth: 0.5)
+            )
+    }
+
+    public static func protocolColor(_ proto: String) -> Color {
+        let p = proto.trimmingCharacters(in: .whitespaces).lowercased()
+        switch p {
+        case "wireguard", "wg":
+            return Color.indigo
+        case "hysteria2", "hysteria", "hy2":
+            return Color.orange
+        case "tuic":
+            return Color.teal
+        case "shadowtls", "shadow-tls":
+            return Color.purple
+        case "vless", "vmess":
+            return Color.blue
+        case "trojan":
+            return Color(red: 0.88, green: 0.35, blue: 0.35)
+        case "shadowsocks", "ss":
+            return Color(red: 0.22, green: 0.72, blue: 0.48)
+        default:
+            return Color.secondary
+        }
+    }
+
+    private func protocolMeta(_ proto: String) -> (Color, String) {
+        let trimmed = proto.trimmingCharacters(in: .whitespaces)
+        let color = Self.protocolColor(trimmed)
+        let text = trimmed.uppercased()
+        return (color, text.isEmpty ? "PROXY" : text)
+    }
+}
+
 // MARK: - 精致按钮样式系统 (高质感液态玻璃微投影 + 连续平滑圆角)
 public struct ExquisitePrimaryButtonStyle: ButtonStyle {
     public var height: CGFloat = 28

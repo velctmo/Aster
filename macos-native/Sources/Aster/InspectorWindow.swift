@@ -1073,14 +1073,15 @@ public struct SurgeProLogsView: View {
             .frame(width: 5.5, height: 5.5)
     }
 
-    // 协议小微标 (柔和低调，3.5pt 圆角)
+    // 协议小微标 (柔和专属语义色彩，3.5pt 圆角)
     private func protocolSubtleBadge(proto: String) -> some View {
-        Text(proto)
+        let color = ProtocolBadge.protocolColor(proto)
+        return Text(proto)
             .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(color == .secondary ? Color.secondary : color)
             .padding(.horizontal, 4.5)
             .padding(.vertical, 1.5)
-            .background(Color.primary.opacity(0.06))
+            .background(color == .secondary ? Color.primary.opacity(0.06) : color.opacity(0.12))
             .clipShape(.rect(cornerRadius: 3.5))
     }
 

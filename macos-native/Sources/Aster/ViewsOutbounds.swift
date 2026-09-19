@@ -542,17 +542,7 @@ public struct NodeCardView: View {
     private var cardContent: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(node.protocolName.uppercased())
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(isSelected ? Color.blue.opacity(0.18) : Color.primary.opacity(0.06))
-                    .foregroundStyle(isSelected ? Color.blue : Color.secondary)
-                    .clipShape(.rect(cornerRadius: 4))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4)
-                            .strokeBorder(isSelected ? Color.blue.opacity(0.3) : Color.primary.opacity(0.08), lineWidth: 0.5)
-                    )
+                ProtocolBadge(proto: node.protocolName, isSelected: isSelected)
 
                 Spacer()
 
@@ -730,13 +720,7 @@ public struct GroupNodeCard: View {
                     .foregroundColor(isSelected ? .white : .secondary)
                     .clipShape(Capsule())
             } else if let proto = node?.protocolName, !proto.isEmpty {
-                Text(proto.uppercased())
-                    .font(.system(size: 8.5, weight: .bold))
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1.5)
-                    .background(isSelected ? Color.blue : Color.secondary.opacity(0.15))
-                    .foregroundColor(isSelected ? .white : .secondary)
-                    .clipShape(Capsule())
+                ProtocolBadge(proto: proto, isSelected: isSelected)
             }
             Spacer()
             LatencyBadge(delayMs: effectiveDelay, isTesting: isTesting)
