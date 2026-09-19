@@ -204,7 +204,7 @@ enum UnixDaemonTransport {
 }
 
 final class UnixWebSocket: @unchecked Sendable {
-    private typealias ReceiveHandler = (Result<URLSessionWebSocketTask.Message, Error>) -> Void
+    typealias ReceiveHandler = (Result<URLSessionWebSocketTask.Message, Error>) -> Void
     private let path: String
     private let token: String
     private var connection: NWConnection?
