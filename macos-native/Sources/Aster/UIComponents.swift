@@ -1,5 +1,7 @@
 import SwiftUI
 import AppKit
+import Foundation
+import Darwin
 
 // MARK: - AsterMetrics (工业级 8pt 度量系统)
 public enum AsterMetrics {
@@ -662,3 +664,609 @@ extension ButtonStyle where Self == ExquisiteSecondaryButtonStyle {
         ExquisiteSecondaryButtonStyle(height: height, cornerRadius: cornerRadius)
     }
 }
+
+// MARK: - 3. 全景分流链路追踪视图
+public struct RuleTracePipelineView: View {
+    public var conn: ConnectionItem
+
+    public init(conn: ConnectionItem) {
+        self.conn = conn
+    }
+
+    private var themeColor: Color {
+        if conn.isReject || conn.diagnostics?.isFailed == true || conn.diagnostics?.closeReason == "rejected" {
+            return Color(red: 0.85, green: 0.38, blue: 0.38) // Reject 警示红
+        } else if conn.isDirect {
+            return Color(red: 0.22, green: 0.72, blue: 0.48) // Direct 柔绿
+        } else {
+            return Color(red: 0.28, green: 0.58, blue: 0.74) // Proxy 科技蓝
+        }
+    }
+
+    public var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(alignment: .center, spacing: 6) {
+                // 1. 应用进程
+                stageCard(
+                    stageNumber: "1",
+                    stageName: "应用进程",
+                    mainContent: conn.effectiveProcess,
+                    subContent: nil,
+                    icon: AnyView(
+                        AppIconView(
+                            processPath: conn.metadata?.processPath ?? "",
+                            processName: conn.effectiveProcess,
+                            size: 14
+                        )
+                    )
+                )
+
+                arrowDivider
+
+                // 2. DNS 与寻址
+                dnsStageCard
+
+                arrowDivider
+
+                // 3. 分流规则
+                ruleStageCard
+
+                arrowDivider
+
+                // 4. 出站决策
+                outboundStageCard
+
+                arrowDivider
+
+                // 5. 终态状态
+                statusStageCard
+            }
+            .padding(.vertical, 4)
+            .padding(.horizontal, 2)
+        }
+    }
+
+    private var arrowDivider: some View {
+        Image(systemName: "chevron.right")
+            .font(.system(size: 8, weight: .bold))
+            .foregroundStyle(themeColor.opacity(0.45))
+    }
+
+    private func stageCard(
+        stageNumber: String,
+        stageName: String,
+        mainContent: String,
+        subContent: String? = nil,
+        icon: AnyView? = nil
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 3) {
+                Text(stageNumber)
+                    .font(.system(size: 8.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(themeColor)
+                Text(stageName)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+            HStack(spacing: 4) {
+                if let icon {
+                    icon
+                }
+                Text(mainContent.isEmpty ? "—" : mainContent)
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+            }
+            if let subContent, !subContent.isEmpty {
+                Text(subContent)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
+        .background(themeColor.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(themeColor.opacity(0.18), lineWidth: 0.5)
+        )
+    }
+
+    private var isPureIPAddress: Bool {
+        let host = conn.metadata?.host ?? ""
+        if host.isEmpty { return true }
+        if host.contains(":") { return true }
+        let parts = host.split(separator: ".")
+        if parts.count == 4 && parts.allSatisfy({ sub in
+            if let val = Int(sub), (0...255).contains(val) { return true }
+            return false
+        }) {
+            return true
+        }
+        return false
+    }
+
+    private var dnsStageCard: some View {
+        let host = conn.metadata?.host ?? ""
+        let destIP = conn.metadata?.destinationIP ?? ""
+
+        if !isPureIPAddress {
+            return stageCard(
+                stageNumber: "2",
+                stageName: "DNS 与寻址",
+                mainContent: "DNS 解析",
+                subContent: destIP.isEmpty ? host : destIP
+            )
+        } else {
+            return stageCard(
+                stageNumber: "2",
+                stageName: "DNS 与寻址",
+                mainContent: "目标直寻",
+                subContent: destIP.isEmpty ? (host.isEmpty ? "直接寻址" : host) : destIP
+            )
+        }
+    }
+
+    private var ruleStageCard: some View {
+        let ruleType = (conn.rule?.trimmingCharacters(in: .whitespaces).uppercased()).flatMap { $0.isEmpty ? nil : $0 } ?? "MATCH"
+        let payload = (conn.rulePayload?.trimmingCharacters(in: .whitespaces)).flatMap { $0.isEmpty ? nil : $0 } ?? "—"
+        return stageCard(
+            stageNumber: "3",
+            stageName: "分流规则",
+            mainContent: ruleType,
+            subContent: payload
+        )
+    }
+
+    private var outboundStageCard: some View {
+        let (action, node) = resolvedOutboundAndNode
+        return stageCard(
+            stageNumber: "4",
+            stageName: "出站决策",
+            mainContent: action,
+            subContent: node
+        )
+    }
+
+    private var resolvedOutboundAndNode: (String, String?) {
+        if conn.isReject {
+            return ("REJECT", "阻断")
+        }
+        if conn.isDirect {
+            return ("DIRECT", "直连出站")
+        }
+        if let chains = conn.chains, !chains.isEmpty {
+            let group = chains.first ?? "Proxy"
+            let landing = chains.count > 1 ? chains.last : nil
+            return (group, landing)
+        }
+        return ("Proxy", nil)
+    }
+
+    private var statusStageCard: some View {
+        let statusText: String
+        let subText: String?
+        if conn.diagnostics?.isFailed == true || conn.diagnostics?.closeReason == "rejected" || conn.diagnostics?.closeReason == "timeout" || conn.diagnostics?.closeReason == "dns_failed" {
+            statusText = "异常终止"
+            subText = conn.diagnostics?.closeReason ?? "失败"
+        } else if conn.isClosed == true || conn.diagnostics?.closeReason == "completed" {
+            statusText = "正常结束"
+            if let ms = conn.diagnostics?.durationMs {
+                subText = ms < 1000 ? "\(ms)ms" : String(format: "%.1fs", Double(ms) / 1000.0)
+            } else {
+                subText = nil
+            }
+        } else {
+            statusText = "活跃传输"
+            if let speedIn = conn.diagnostics?.speedIn, speedIn > 0 {
+                subText = "↓ \(Formatters.bytesString(speedIn))/s"
+            } else {
+                subText = nil
+            }
+        }
+
+        return stageCard(
+            stageNumber: "5",
+            stageName: "终态状态",
+            mainContent: statusText,
+            subContent: subText
+        )
+    }
+}
+
+// MARK: - 4. 状态微光与异常诊断徽标
+public struct ConnectionDiagnosticBadge: View {
+    public var conn: ConnectionItem
+
+    public init(conn: ConnectionItem) {
+        self.conn = conn
+    }
+
+    private var durationText: String {
+        if let ms = conn.diagnostics?.durationMs {
+            if ms < 1000 {
+                return "\(ms)ms"
+            } else {
+                return String(format: "%.1fs", Double(ms) / 1000.0)
+            }
+        }
+        return "完成"
+    }
+
+    public var body: some View {
+        Group {
+            if conn.diagnostics?.closeReason == "rejected" || conn.isReject {
+                badgeLayout(
+                    text: "⊘ 阻断",
+                    textColor: Color(red: 0.88, green: 0.35, blue: 0.35),
+                    bgColor: Color(red: 0.88, green: 0.35, blue: 0.35).opacity(0.12),
+                    borderColor: Color(red: 0.88, green: 0.35, blue: 0.35).opacity(0.30)
+                )
+            } else if conn.diagnostics?.closeReason == "timeout" {
+                badgeLayout(
+                    text: "⏱ 超时",
+                    textColor: Color.orange,
+                    bgColor: Color.orange.opacity(0.12),
+                    borderColor: Color.orange.opacity(0.30)
+                )
+            } else if conn.diagnostics?.closeReason == "dns_failed" {
+                badgeLayout(
+                    text: "⚠ DNS 异常",
+                    textColor: Color(red: 0.65, green: 0.40, blue: 0.85),
+                    bgColor: Color(red: 0.65, green: 0.40, blue: 0.85).opacity(0.12),
+                    borderColor: Color(red: 0.65, green: 0.40, blue: 0.85).opacity(0.30)
+                )
+            } else if conn.isClosed == true || conn.diagnostics?.closeReason == "completed" {
+                badgeLayout(
+                    text: "✓ \(durationText)",
+                    textColor: Color.secondary,
+                    bgColor: Color.secondary.opacity(0.10),
+                    borderColor: Color.secondary.opacity(0.22)
+                )
+            } else {
+                activeBadge
+            }
+        }
+    }
+
+    private func badgeLayout(text: String, textColor: Color, bgColor: Color, borderColor: Color) -> some View {
+        Text(text)
+            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+            .foregroundStyle(textColor)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2.5)
+            .background(bgColor)
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .strokeBorder(borderColor, lineWidth: 0.5)
+            )
+    }
+
+    private var activeBadge: some View {
+        HStack(spacing: 4) {
+            ZStack {
+                Circle()
+                    .fill(Color.green.opacity(0.25))
+                    .frame(width: 8, height: 8)
+                Circle()
+                    .fill(Color.green)
+                    .frame(width: 5, height: 5)
+            }
+            if let speedIn = conn.diagnostics?.speedIn, speedIn > 0 {
+                Text("↓ \(Formatters.bytesString(speedIn))/s")
+                    .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                    .foregroundStyle(Color.green)
+            } else {
+                Text("活跃")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(Color.green)
+            }
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2.5)
+        .background(Color.green.opacity(0.09))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .strokeBorder(Color.green.opacity(0.25), lineWidth: 0.5)
+        )
+    }
+}
+
+// MARK: - 5. 标准化连接属性审查抽屉
+public struct ConnectionDetailDrawer: View {
+    public var conn: ConnectionItem
+    public var onClose: () -> Void
+
+    public init(conn: ConnectionItem, onClose: @escaping () -> Void) {
+        self.conn = conn
+        self.onClose = onClose
+    }
+
+    public var body: some View {
+        VStack(spacing: 0) {
+            // 顶栏：标题「连接属性审查」、目标域名、关闭按钮
+            headerView
+
+            Divider()
+                .opacity(0.5)
+
+            // 主体分 5 个卡片分区
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(spacing: 12) {
+                    // 1. 发起端信息
+                    initiatorCard
+
+                    // 2. 目标网络
+                    destinationCard
+
+                    // 3. 全景分流链路
+                    pipelineCard
+
+                    // 4. 时序与吞吐
+                    timingCard
+
+                    // 5. 快捷分流动作
+                    quickActionsCard
+                }
+                .padding(14)
+            }
+        }
+        .frame(width: 340)
+        .background(.ultraThinMaterial)
+        .overlay(
+            Rectangle()
+                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+        )
+    }
+
+    private var headerView: some View {
+        HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("连接属性审查")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(.primary)
+                Text(conn.metadata?.host ?? conn.effectiveTarget)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer(minLength: 8)
+            Button(action: onClose) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 15))
+                    .foregroundStyle(.secondary.opacity(0.7))
+            }
+            .buttonStyle(.plain)
+            .help("关闭审查抽屉")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    // 1. 发起端信息
+    private var initiatorCard: some View {
+        DrawerCard(title: "发起端信息", icon: "app.dashed") {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    AppIconView(
+                        processPath: conn.metadata?.processPath ?? "",
+                        processName: conn.effectiveProcess,
+                        size: 22
+                    )
+                    Text(conn.effectiveProcess)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                }
+                DrawerInfoRow(
+                    label: "二进制路径",
+                    value: conn.metadata?.processPath ?? "—",
+                    isMonospaced: true,
+                    copyable: true
+                )
+                DrawerInfoRow(
+                    label: "来源 IP",
+                    value: conn.metadata?.sourceIP ?? "127.0.0.1",
+                    isMonospaced: true
+                )
+            }
+        }
+    }
+
+    // 2. 目标网络
+    private var destinationCard: some View {
+        DrawerCard(title: "目标网络", icon: "network") {
+            VStack(alignment: .leading, spacing: 6) {
+                let host = conn.metadata?.host ?? conn.effectiveTarget
+                DrawerInfoRow(label: "目标主机", value: host, isMonospaced: true, copyable: true)
+                DrawerInfoRow(label: "目标 IP", value: conn.metadata?.destinationIP ?? "—", isMonospaced: true)
+                DrawerInfoRow(label: "端口", value: conn.metadata?.destinationPort ?? "—", isMonospaced: true)
+                DrawerInfoRow(label: "网络协议", value: (conn.metadata?.network ?? "tcp").uppercased(), isMonospaced: true)
+            }
+        }
+    }
+
+    // 3. 全景分流链路
+    private var pipelineCard: some View {
+        DrawerCard(title: "全景分流链路", icon: "arrow.triangle.branch") {
+            RuleTracePipelineView(conn: conn)
+        }
+    }
+
+    // 4. 时序与吞吐
+    private var timingCard: some View {
+        DrawerCard(title: "时序与吞吐", icon: "gauge.with.needle") {
+            VStack(alignment: .leading, spacing: 6) {
+                DrawerInfoRow(label: "开始时间", value: formatStartTime(conn.start), isMonospaced: true)
+                DrawerInfoRow(label: "持续时间", value: formatDuration(conn.diagnostics?.durationMs), isMonospaced: true)
+                DrawerInfoRow(
+                    label: "瞬时下行",
+                    value: conn.diagnostics?.speedIn.map { "\(Formatters.bytesString($0))/s" } ?? "0 B/s",
+                    isMonospaced: true
+                )
+                DrawerInfoRow(
+                    label: "瞬时上行",
+                    value: conn.diagnostics?.speedOut.map { "\(Formatters.bytesString($0))/s" } ?? "0 B/s",
+                    isMonospaced: true
+                )
+                DrawerInfoRow(label: "累计下行", value: Formatters.bytesString(conn.download), isMonospaced: true)
+                DrawerInfoRow(label: "累计上行", value: Formatters.bytesString(conn.upload), isMonospaced: true)
+                DrawerInfoRow(label: "关闭原因", value: formatCloseReason)
+            }
+        }
+    }
+
+    // 5. 快捷分流动作
+    private var quickActionsCard: some View {
+        DrawerCard(title: "快捷分流动作", icon: "bolt.fill") {
+            VStack(spacing: 8) {
+                Button {
+                    let host = conn.metadata?.host ?? conn.effectiveTarget
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(host, forType: .string)
+                    AsterState.shared.notify(message: "已复制目标主机: \(host)", type: .success)
+                } label: {
+                    HStack {
+                        Image(systemName: "doc.on.doc")
+                        Text("复制目标主机")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.exquisiteSecondary(height: 28))
+
+                Button {
+                    AsterState.shared.closeConnection(conn.id)
+                    AsterState.shared.notify(message: "已断开连接", type: .info)
+                    onClose()
+                } label: {
+                    HStack {
+                        Image(systemName: "xmark.circle")
+                        Text("一键断开连接")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.exquisiteSecondary(height: 28))
+                .foregroundStyle(.red)
+            }
+        }
+    }
+
+    private func formatStartTime(_ start: String?) -> String {
+        guard let start, !start.isEmpty else { return "—" }
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = isoFormatter.date(from: start) {
+            let df = DateFormatter()
+            df.dateFormat = "HH:mm:ss.SSS"
+            return df.string(from: date)
+        }
+        isoFormatter.formatOptions = [.withInternetDateTime]
+        if let date = isoFormatter.date(from: start) {
+            let df = DateFormatter()
+            df.dateFormat = "HH:mm:ss"
+            return df.string(from: date)
+        }
+        return start
+    }
+
+    private func formatDuration(_ ms: Int64?) -> String {
+        guard let ms else { return "—" }
+        if ms < 0 { return "0ms" }
+        if ms < 1000 {
+            return "\(ms)ms"
+        } else {
+            return String(format: "%.2fs", Double(ms) / 1000.0)
+        }
+    }
+
+    private var formatCloseReason: String {
+        if let reason = conn.diagnostics?.closeReason {
+            switch reason {
+            case "rejected": return "⊘ 规则阻断"
+            case "timeout": return "⏱ 连接超时"
+            case "dns_failed": return "⚠ DNS 异常"
+            case "completed": return "✓ 正常完成"
+            case "active": return "● 活跃传输中"
+            default: return reason
+            }
+        }
+        if conn.isReject { return "⊘ 规则阻断" }
+        if conn.isClosed == true { return "✓ 已关闭" }
+        return "● 活跃传输中"
+    }
+}
+
+// MARK: - 抽屉辅助卡片与行布局容器
+private struct DrawerCard<Content: View>: View {
+    let title: String
+    let icon: String
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Text(title)
+                    .font(.system(size: 11.5, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+            content()
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.primary.opacity(0.035))
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.5)
+        )
+    }
+}
+
+private struct DrawerInfoRow: View {
+    let label: String
+    let value: String
+    var isMonospaced: Bool = false
+    var copyable: Bool = false
+
+    @State private var copied: Bool = false
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 6) {
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .frame(width: 68, alignment: .leading)
+            Text(value.isEmpty ? "—" : value)
+                .font(.system(size: 11, weight: .medium, design: isMonospaced ? .monospaced : .default))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Spacer(minLength: 4)
+            if copyable && !value.isEmpty && value != "—" {
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(value, forType: .string)
+                    copied = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                        copied = false
+                    }
+                } label: {
+                    Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                        .font(.system(size: 10))
+                        .foregroundStyle(copied ? Color.green : Color.secondary)
+                }
+                .buttonStyle(.plain)
+                .help(copied ? "已复制" : "复制")
+            }
+        }
+    }
+}
+

@@ -811,6 +811,31 @@ public class AsterState: ObservableObject {
         } catch {}
     }
 
+    public func evaluateRule(target: String, process: String? = nil, port: Int? = nil, network: String? = nil) async throws -> RuleEvaluateResult {
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "target", value: target)
+        ]
+        if let process, !process.isEmpty {
+            queryItems.append(URLQueryItem(name: "process", value: process))
+        }
+        if let port {
+            queryItems.append(URLQueryItem(name: "port", value: String(port)))
+        }
+        if let network, !network.isEmpty {
+            queryItems.append(URLQueryItem(name: "network", value: network))
+        }
+
+        let (data, response) = try await apiGet("/api/v1/rules/evaluate", query: queryItems)
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        guard (200...299).contains(http.statusCode) else {
+            let errorMsg = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+            throw NSError(domain: "Aster", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: errorMsg])
+        }
+        return try JSONDecoder().decode(RuleEvaluateResult.self, from: data)
+    }
+
     public func setMode(_ mode: String) {
         triggerHaptic()
         // 乐观更新：立刻在界面上呈现所选分流模式，杜绝回跳
@@ -2401,3 +2426,15 @@ private struct LogEventPayload: Codable {
         return route.isEmpty ? "\(origin) → \(destination)" : "\(origin) → \(destination) · \(route)"
     }
 }
+
+// MARK: - AsterAPIClient
+public final class AsterAPIClient: Sendable {
+    public static let shared = AsterAPIClient()
+
+    public init() {}
+
+    public func evaluateRule(target: String, process: String? = nil, port: Int? = nil, network: String? = nil) async throws -> RuleEvaluateResult {
+        try await AsterState.shared.evaluateRule(target: target, process: process, port: port, network: network)
+    }
+}
+
