@@ -302,8 +302,25 @@ func clashToOutbound(p map[string]any, typ, tag string) (json.RawMessage, error)
 			m["down_mbps"] = down
 		}
 	case "tuic":
-		m["uuid"] = str(p["uuid"])
+		m["uuid"] = first(str(p["uuid"]), str(p["token"]))
 		m["password"] = str(p["password"])
+		if cc := strings.ToLower(str(getFirst(p, "congestion-controller", "congestion_controller"))); cc != "" {
+			m["congestion_controller"] = cc
+		}
+		if urm := strings.ToLower(str(getFirst(p, "udp-relay-mode", "udp_relay_mode"))); urm != "" {
+			m["udp_relay_mode"] = urm
+		}
+		if v := getFirst(p, "zero-rtt-handshake", "zero_rtt_handshake", "reduce-rtt", "reduce_rtt"); v != nil {
+			m["zero_rtt_handshake"] = boolVal(v)
+		} else {
+			m["zero_rtt_handshake"] = true
+		}
+		if hb := str(getFirst(p, "heartbeat", "heartbeat-interval", "heartbeat_interval")); hb != "" {
+			if _, err := strconv.Atoi(hb); err == nil {
+				hb = hb + "s"
+			}
+			m["heartbeat"] = hb
+		}
 		applyTLS(m, p, true)
 	case "anytls":
 		m["password"] = str(p["password"])
@@ -355,7 +372,14 @@ func applyTLS(m map[string]any, p map[string]any, enabled bool) {
 		tls["utls"] = map[string]any{"enabled": true, "fingerprint": fp}
 	}
 	if alpn := p["alpn"]; alpn != nil {
-		tls["alpn"] = alpn
+		switch v := alpn.(type) {
+		case string:
+			if v != "" {
+				tls["alpn"] = strings.Split(v, ",")
+			}
+		default:
+			tls["alpn"] = alpn
+		}
 	}
 	if ro, ok := p["reality-opts"].(map[string]any); ok {
 		tls["reality"] = map[string]any{
@@ -571,16 +595,24 @@ func ssURI(line string) (state.Node, error) {
 }
 
 func tuicURI(u *url.URL) (state.Node, error) {
+	q := u.Query()
 	name := first(u.Fragment, u.Hostname())
-	uuid := u.User.Username()
-	pw, _ := u.User.Password()
+	var uuid, pw string
+	if u.User != nil {
+		uuid = u.User.Username()
+		pw, _ = u.User.Password()
+	}
 	port := intVal(u.Port())
 	if port == 0 {
 		port = 443
 	}
-	tlsMap := map[string]any{"enabled": true, "server_name": first(u.Query().Get("sni"), u.Hostname())}
-	if alpn := u.Query().Get("alpn"); alpn != "" {
+	sni := first(q.Get("sni"), q.Get("peer"), u.Hostname())
+	tlsMap := map[string]any{"enabled": true, "server_name": sni}
+	if alpn := q.Get("alpn"); alpn != "" {
 		tlsMap["alpn"] = strings.Split(alpn, ",")
+	}
+	if q.Get("allow_insecure") == "1" || q.Get("insecure") == "1" || strings.EqualFold(q.Get("allow_insecure"), "true") || strings.EqualFold(q.Get("insecure"), "true") {
+		tlsMap["insecure"] = true
 	}
 	m := map[string]any{
 		"type":        "tuic",
@@ -591,8 +623,23 @@ func tuicURI(u *url.URL) (state.Node, error) {
 		"password":    pw,
 		"tls":         tlsMap,
 	}
-	if cc := u.Query().Get("congestion_controller"); cc != "" {
+	if cc := strings.ToLower(first(q.Get("congestion_controller"), q.Get("congestion-controller"), q.Get("congestion_control"), q.Get("congestion-control"))); cc != "" {
 		m["congestion_controller"] = cc
+	}
+	if urm := strings.ToLower(first(q.Get("udp_relay_mode"), q.Get("udp-relay-mode"))); urm != "" {
+		m["udp_relay_mode"] = urm
+	}
+	zrttStr := first(q.Get("zero_rtt_handshake"), q.Get("zero-rtt-handshake"), q.Get("reduce_rtt"), q.Get("reduce-rtt"))
+	if zrttStr != "" && (zrttStr == "0" || strings.EqualFold(zrttStr, "false")) {
+		m["zero_rtt_handshake"] = false
+	} else {
+		m["zero_rtt_handshake"] = true
+	}
+	if hb := first(q.Get("heartbeat"), q.Get("heartbeat-interval"), q.Get("heartbeat_interval")); hb != "" {
+		if _, err := strconv.Atoi(hb); err == nil {
+			hb = hb + "s"
+		}
+		m["heartbeat"] = hb
 	}
 	b, _ := json.Marshal(m)
 	return state.Node{ID: state.NewID(), Name: name, Protocol: "tuic", Outbound: b}, nil

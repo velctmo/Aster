@@ -97,14 +97,160 @@ func TestFilterNodes(t *testing.T) {
 }
 
 func TestParseTUIC(t *testing.T) {
-	raw := "tuic://11111111-1111-1111-1111-111111111111:my-pass@example.com:8443?congestion_controller=bbr&alpn=h3&sni=example.com#tuic-node"
-	r, err := Parse(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(r.Nodes) != 1 || r.Nodes[0].Protocol != "tuic" {
-		t.Fatalf("got %+v", r.Nodes)
-	}
+	t.Run("URI format with options", func(t *testing.T) {
+		raw := "tuic://11111111-1111-1111-1111-111111111111:my-pass@example.com:8443?congestion_controller=bbr&udp_relay_mode=native&alpn=h3&sni=example.com#tuic-node"
+		r, err := Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(r.Nodes) != 1 || r.Nodes[0].Protocol != "tuic" {
+			t.Fatalf("got %+v", r.Nodes)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(r.Nodes[0].Outbound, &m); err != nil {
+			t.Fatal(err)
+		}
+		if m["congestion_controller"] != "bbr" {
+			t.Fatalf("expected congestion_controller bbr, got %v", m["congestion_controller"])
+		}
+		if m["udp_relay_mode"] != "native" {
+			t.Fatalf("expected udp_relay_mode native, got %v", m["udp_relay_mode"])
+		}
+		if m["zero_rtt_handshake"] != true {
+			t.Fatalf("expected zero_rtt_handshake true, got %v", m["zero_rtt_handshake"])
+		}
+		tls, ok := m["tls"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected tls map, got %v", m["tls"])
+		}
+		if tls["server_name"] != "example.com" {
+			t.Fatalf("expected server_name example.com, got %v", tls["server_name"])
+		}
+	})
+
+	t.Run("URI format with reduce_rtt disabled", func(t *testing.T) {
+		raw := "tuic://11111111-1111-1111-1111-111111111111:my-pass@example.com:8443?congestion-controller=cubic&udp-relay-mode=quic&reduce_rtt=0"
+		r, err := Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(r.Nodes[0].Outbound, &m); err != nil {
+			t.Fatal(err)
+		}
+		if m["congestion_controller"] != "cubic" {
+			t.Fatalf("expected congestion_controller cubic, got %v", m["congestion_controller"])
+		}
+		if m["udp_relay_mode"] != "quic" {
+			t.Fatalf("expected udp_relay_mode quic, got %v", m["udp_relay_mode"])
+		}
+		if m["zero_rtt_handshake"] != false {
+			t.Fatalf("expected zero_rtt_handshake false, got %v", m["zero_rtt_handshake"])
+		}
+	})
+
+	t.Run("Clash YAML format full options", func(t *testing.T) {
+		raw := `
+proxies:
+  - name: tuic-clash
+    type: tuic
+    server: example.com
+    port: 8443
+    uuid: 11111111-1111-1111-1111-111111111111
+    password: my-pass
+    congestion-controller: bbr
+    udp-relay-mode: native
+    reduce-rtt: true
+    heartbeat: 10s
+    sni: example.com
+    alpn: [h3]
+`
+		r, err := Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(r.Nodes) != 1 || r.Nodes[0].Protocol != "tuic" {
+			t.Fatalf("got %+v", r.Nodes)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(r.Nodes[0].Outbound, &m); err != nil {
+			t.Fatal(err)
+		}
+		if m["congestion_controller"] != "bbr" {
+			t.Fatalf("expected congestion_controller bbr, got %v", m["congestion_controller"])
+		}
+		if m["udp_relay_mode"] != "native" {
+			t.Fatalf("expected udp_relay_mode native, got %v", m["udp_relay_mode"])
+		}
+		if m["zero_rtt_handshake"] != true {
+			t.Fatalf("expected zero_rtt_handshake true, got %v", m["zero_rtt_handshake"])
+		}
+		if m["heartbeat"] != "10s" {
+			t.Fatalf("expected heartbeat 10s, got %v", m["heartbeat"])
+		}
+		tls, ok := m["tls"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected tls map, got %v", m["tls"])
+		}
+		if tls["server_name"] != "example.com" {
+			t.Fatalf("expected server_name example.com, got %v", tls["server_name"])
+		}
+	})
+
+	t.Run("Clash YAML format variations", func(t *testing.T) {
+		raw := `
+proxies:
+  - name: tuic-clash-2
+    type: tuic
+    server: example.com
+    port: 8443
+    uuid: 11111111-1111-1111-1111-111111111111
+    password: my-pass
+    congestion_controller: CUBIC
+    udp_relay_mode: QUIC
+    zero_rtt_handshake: false
+`
+		r, err := Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(r.Nodes[0].Outbound, &m); err != nil {
+			t.Fatal(err)
+		}
+		if m["congestion_controller"] != "cubic" {
+			t.Fatalf("expected congestion_controller cubic, got %v", m["congestion_controller"])
+		}
+		if m["udp_relay_mode"] != "quic" {
+			t.Fatalf("expected udp_relay_mode quic, got %v", m["udp_relay_mode"])
+		}
+		if m["zero_rtt_handshake"] != false {
+			t.Fatalf("expected zero_rtt_handshake false, got %v", m["zero_rtt_handshake"])
+		}
+	})
+
+	t.Run("Clash YAML default zero_rtt_handshake", func(t *testing.T) {
+		raw := `
+proxies:
+  - name: tuic-default-zrtt
+    type: tuic
+    server: example.com
+    port: 8443
+    uuid: 11111111-1111-1111-1111-111111111111
+    password: my-pass
+`
+		r, err := Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(r.Nodes[0].Outbound, &m); err != nil {
+			t.Fatal(err)
+		}
+		if m["zero_rtt_handshake"] != true {
+			t.Fatalf("expected zero_rtt_handshake true by default, got %v", m["zero_rtt_handshake"])
+		}
+	})
 }
 
 func TestParseSSWithPlugin(t *testing.T) {
