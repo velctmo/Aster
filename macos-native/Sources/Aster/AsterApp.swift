@@ -924,6 +924,151 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         item.attributedTitle = title
     }
 
+    private struct StrategyMemberPresentation {
+        let title: String
+        let accessory: String
+        let delayColor: NSColor
+        let attrAccessory: NSAttributedString
+        let checked: Bool
+        let enabled: Bool
+        let toolTip: String
+    }
+
+    private func protocolShortCode(for rawProtocol: String) -> String? {
+        let p = rawProtocol.trimmingCharacters(in: .whitespaces).lowercased()
+        switch p {
+        case "hysteria2", "hy2":
+            return "HY2"
+        case "hysteria", "hy":
+            return "HY"
+        case "tuic":
+            return "TUIC"
+        case "wireguard", "wg":
+            return "WG"
+        case "shadowtls", "shadow-tls":
+            return "STLS"
+        case "vless":
+            return "VLESS"
+        case "vmess":
+            return "VMESS"
+        case "trojan":
+            return "TROJAN"
+        case "shadowsocks", "ss":
+            return "SS"
+        case "socks", "socks5":
+            return "SOCKS5"
+        case "http", "https":
+            return "HTTP"
+        default:
+            if !p.isEmpty && p != "unknown" {
+                return p.uppercased()
+            }
+            return nil
+        }
+    }
+
+    private func nodeDelayColor(delay: Int, isTesting: Bool) -> NSColor {
+        if isTesting {
+            return .systemBlue
+        }
+        if delay < 0 {
+            return NSColor(calibratedRed: 0.85, green: 0.38, blue: 0.38, alpha: 1.0)
+        }
+        if delay == 0 {
+            return .secondaryLabelColor
+        }
+        if delay <= 150 {
+            return NSColor(calibratedRed: 0.22, green: 0.72, blue: 0.48, alpha: 1.0)
+        }
+        if delay <= 500 {
+            return NSColor(calibratedRed: 0.88, green: 0.62, blue: 0.22, alpha: 1.0)
+        }
+        return NSColor(calibratedRed: 0.85, green: 0.38, blue: 0.38, alpha: 1.0)
+    }
+
+    private func formatStrategyMember(group: StrategyGroup, tag: String) -> StrategyMemberPresentation {
+        let state = AsterState.shared
+        let isAuto = (tag == "auto")
+        let childGroup = isAuto ? nil : state.group(tagged: tag)
+        let node = state.findNode(for: tag)
+
+        let title: String
+        var toolTip: String
+
+        if isAuto {
+            let winner = state.autoWinnerName()
+            if let winner, !winner.isEmpty {
+                title = "♻️ 自动优选 ➔ \(NodeNameSanitizer.clean(winner))"
+            } else {
+                title = "♻️ 自动优选"
+            }
+            var tip = "自动测速并分流至最低延迟节点"
+            if let winner {
+                tip += " (当前命中: \(winner))"
+            }
+            toolTip = tip
+        } else if let childGroup {
+            let groupName = childGroup.name.isEmpty ? tag : childGroup.name
+            let cleanName = NodeNameSanitizer.clean(groupName)
+            title = cleanName.hasPrefix("[组]") ? cleanName : "[组] \(cleanName)"
+            var tip = "策略组: \(childGroup.name)"
+            if let now = childGroup.now, !now.isEmpty {
+                tip += " (当前选择: \(state.memberTitle(for: now)))"
+            }
+            toolTip = tip
+        } else if tag == "direct" {
+            title = "DIRECT"
+            toolTip = "直连出站"
+        } else if tag == "block" || tag == "reject" {
+            title = "REJECT"
+            toolTip = "阻断出站"
+        } else {
+            let rawTitle = state.memberTitle(for: tag)
+            if let proto = node?.protocolName, let badge = protocolShortCode(for: proto) {
+                let badgePrefix = "[\(badge)]"
+                if rawTitle.localizedCaseInsensitiveContains(badgePrefix) {
+                    title = rawTitle
+                } else {
+                    title = "\(badgePrefix) \(rawTitle)"
+                }
+            } else {
+                title = rawTitle
+            }
+            toolTip = title
+        }
+
+        let isTesting = state.isNodeTesting(tag) || (isAuto && state.isTestingGroup(group)) || state.isTestingDelays
+        let delay: Int = {
+            if let childGroup {
+                return childGroup.delayMs ?? state.memberDelay(for: tag)
+            }
+            return state.memberDelay(for: tag)
+        }()
+        let accessory = nodeDelayText(delay: delay, tag: tag, isTesting: isTesting)
+        let delayColor = nodeDelayColor(delay: delay, isTesting: isTesting)
+        let checked = state.isMemberSelected(group: group, tag: tag)
+        let enabled = state.canSelectMember(group: group, tag: tag)
+        let finalToolTip = toolTip.contains(accessory) ? toolTip : "\(toolTip)  \(accessory)"
+
+        let attrAccessory = NSAttributedString(
+            string: accessory,
+            attributes: [
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
+                .foregroundColor: delayColor
+            ]
+        )
+
+        return StrategyMemberPresentation(
+            title: title,
+            accessory: accessory,
+            delayColor: delayColor,
+            attrAccessory: attrAccessory,
+            checked: checked,
+            enabled: enabled,
+            toolTip: finalToolTip
+        )
+    }
+
     private func refreshStickyView(_ view: StickyMenuItemView) {
         let state = AsterState.shared
         switch view.kind {
@@ -933,12 +1078,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
             view.apply(checked: state.configs.first(where: { $0.id == id })?.active == true)
         case .node(let groupTag, let tag):
             guard let group = state.group(tagged: groupTag) else { return }
-            let delay = state.memberDelay(for: tag)
+            let p = formatStrategyMember(group: group, tag: tag)
             view.apply(
-                title: state.memberTitle(for: tag),
-                accessory: nodeDelayText(delay: delay, tag: tag, isTesting: state.isNodeTesting(tag)),
-                checked: state.isMemberSelected(group: group, tag: tag),
-                enabled: state.canSelectMember(group: group, tag: tag)
+                title: p.title,
+                accessory: p.accessory,
+                accessoryColor: p.delayColor,
+                accessoryAttributedString: p.attrAccessory,
+                checked: p.checked,
+                enabled: p.enabled,
+                toolTip: p.toolTip
             )
         case .action, .capture:
             break
@@ -959,28 +1107,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
     }
 
     private func applyStrategyMemberItem(_ item: NSMenuItem, group: StrategyGroup, tag: String) {
-        let state = AsterState.shared
-        let title = state.memberTitle(for: tag)
-        let delay = state.memberDelay(for: tag)
-        let checked = state.isMemberSelected(group: group, tag: tag)
-        let enabled = state.canSelectMember(group: group, tag: tag)
-        let accessory = nodeDelayText(delay: delay, tag: tag, isTesting: state.isNodeTesting(tag))
-        item.title = title.truncated(toVisualWidth: 26)
-        item.state = checked ? .on : .off
-        item.isEnabled = enabled
+        let p = formatStrategyMember(group: group, tag: tag)
+        item.title = p.title.truncated(toVisualWidth: 26)
+        item.state = p.checked ? .on : .off
+        item.isEnabled = p.enabled
+        item.toolTip = p.toolTip
+
         if let view = item.view as? StickyMenuItemView {
-            view.apply(title: title, accessory: accessory, checked: checked, enabled: enabled)
+            view.apply(
+                title: p.title,
+                accessory: p.accessory,
+                accessoryColor: p.delayColor,
+                accessoryAttributedString: p.attrAccessory,
+                checked: p.checked,
+                enabled: p.enabled,
+                toolTip: p.toolTip
+            )
         } else {
-            item.attributedTitle = nodeMenuTitle(name: title, tag: tag, delay: delay)
-        }
-        if tag == "auto" {
-            var tip = "自动测速并分流至最低延迟节点"
-            if let winner = state.autoWinnerName() {
-                tip += " (当前命中: \(winner))"
-            }
-            item.toolTip = tip
-        } else {
-            item.toolTip = "\(title)  \(nodeDelayText(delay: delay, tag: tag, isTesting: state.isNodeTesting(tag)))"
+            let delay = AsterState.shared.memberDelay(for: tag)
+            item.attributedTitle = nodeMenuTitle(name: p.title, tag: tag, delay: delay)
         }
     }
 
@@ -1026,25 +1171,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         let cleanName = name.truncated(toVisualWidth: 20)
         let isTesting = AsterState.shared.testingTags.contains(tag) || AsterState.shared.isTestingDelays
         let delayText = nodeDelayText(delay: delay, tag: tag, isTesting: isTesting)
-        
-        let textColor: NSColor = {
-            if isTesting {
-                return .systemBlue
-            }
-            if delay < 0 {
-                return NSColor(calibratedRed: 0.85, green: 0.38, blue: 0.38, alpha: 1.0)
-            }
-            if delay == 0 {
-                return .secondaryLabelColor
-            }
-            if delay <= 150 {
-                return NSColor(calibratedRed: 0.22, green: 0.72, blue: 0.48, alpha: 1.0)
-            }
-            if delay <= 500 {
-                return NSColor(calibratedRed: 0.88, green: 0.62, blue: 0.22, alpha: 1.0)
-            }
-            return NSColor(calibratedRed: 0.85, green: 0.38, blue: 0.38, alpha: 1.0)
-        }()
+        let textColor = nodeDelayColor(delay: delay, isTesting: isTesting)
 
         let paragraphStyle = NSMutableParagraphStyle()
         paragraphStyle.tabStops = [
@@ -1061,7 +1188,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         if let tabRange = fullText.range(of: "\t") {
             let nsRange = NSRange(tabRange.upperBound..<fullText.endIndex, in: fullText)
             title.addAttributes([
-                .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold),
+                .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
                 .foregroundColor: textColor,
             ], range: nsRange)
         }
@@ -1321,6 +1448,8 @@ final class StickyMenuItemView: NSView {
     private var onClick: () -> Void
     private var titleText: String
     private var accessoryText: String
+    private var accessoryColor: NSColor
+    private var accessoryAttributedString: NSAttributedString?
     private var checked: Bool
     private var itemEnabled: Bool
     private var isHighlighted = false
@@ -1343,6 +1472,8 @@ final class StickyMenuItemView: NSView {
     init(
         title: String,
         accessory: String = "",
+        accessoryColor: NSColor = .secondaryLabelColor,
+        accessoryAttributedString: NSAttributedString? = nil,
         icon: NSImage? = nil,
         checked: Bool = false,
         enabled: Bool = true,
@@ -1353,6 +1484,8 @@ final class StickyMenuItemView: NSView {
         self.onClick = onClick
         self.titleText = title
         self.accessoryText = accessory
+        self.accessoryColor = accessoryColor
+        self.accessoryAttributedString = accessoryAttributedString
         self.checked = checked
         self.itemEnabled = enabled
         super.init(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
@@ -1361,11 +1494,18 @@ final class StickyMenuItemView: NSView {
         iconView.image = icon
         iconView.imageScaling = .scaleProportionallyUpOrDown
         setupUI()
-        apply(title: title, accessory: accessory, checked: checked, enabled: enabled)
+        apply(
+            title: title,
+            accessory: accessory,
+            accessoryColor: accessoryColor,
+            accessoryAttributedString: accessoryAttributedString,
+            checked: checked,
+            enabled: enabled
+        )
     }
 
     required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been coded")
+        fatalError("init(coder:) has not been implemented")
     }
 
     private func setupUI() {
@@ -1507,24 +1647,49 @@ final class StickyMenuItemView: NSView {
     func apply(
         title: String? = nil,
         accessory: String? = nil,
+        accessoryColor: NSColor? = nil,
+        accessoryAttributedString: NSAttributedString? = nil,
         icon: NSImage? = nil,
         checked: Bool? = nil,
         enabled: Bool? = nil,
         toolTip: String? = nil
     ) {
         if let title { titleText = title }
-        if let accessory { accessoryText = accessory }
+        if let accessory {
+            accessoryText = accessory
+            if accessoryAttributedString == nil {
+                self.accessoryAttributedString = nil
+            }
+        }
+        if let accessoryColor { self.accessoryColor = accessoryColor }
+        if let accessoryAttributedString {
+            self.accessoryAttributedString = accessoryAttributedString
+            self.accessoryText = accessoryAttributedString.string
+        }
         if let icon { iconView.image = icon }
         if let checked { self.checked = checked }
         if let enabled { itemEnabled = enabled }
         if let toolTip { self.toolTip = toolTip }
+
         titleLabel.stringValue = titleText
-        accessoryLabel.stringValue = accessoryText
+
+        if let attrStr = self.accessoryAttributedString {
+            if isHighlighted {
+                let m = NSMutableAttributedString(attributedString: attrStr)
+                m.addAttribute(.foregroundColor, value: NSColor.selectedMenuItemTextColor, range: NSRange(location: 0, length: m.length))
+                accessoryLabel.attributedStringValue = m
+            } else {
+                accessoryLabel.attributedStringValue = attrStr
+            }
+        } else {
+            accessoryLabel.stringValue = accessoryText
+            accessoryLabel.textColor = isHighlighted ? .selectedMenuItemTextColor : self.accessoryColor
+        }
+
         checkView.image = self.checked ? NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil) : nil
         checkView.contentTintColor = isHighlighted ? .selectedMenuItemTextColor : .labelColor
         iconView.contentTintColor = isHighlighted ? .selectedMenuItemTextColor : .labelColor
         titleLabel.textColor = isHighlighted ? .selectedMenuItemTextColor : .labelColor
-        accessoryLabel.textColor = isHighlighted ? .selectedMenuItemTextColor : .secondaryLabelColor
         alphaValue = itemEnabled ? 1 : 0.4
         needsLayout = true
         needsDisplay = true
@@ -1575,22 +1740,22 @@ final class StrategySpeedHeaderView: NSView {
 
     private func setupUI() {
         wantsLayer = true
-        layer?.cornerRadius = 4.0
+        layer?.cornerRadius = 4.5
 
         iconView.image = NSImage(systemSymbolName: "bolt.fill", accessibilityDescription: "延迟测试")
         iconView.contentTintColor = .labelColor
-        iconView.frame = NSRect(x: 14, y: 5, width: 14, height: 14)
+        iconView.frame = NSRect(x: 8, y: 6, width: 14, height: 14)
         addSubview(iconView)
 
         spinner.style = .spinning
         spinner.controlSize = .small
-        spinner.frame = NSRect(x: 14, y: 5, width: 14, height: 14)
+        spinner.frame = NSRect(x: 8, y: 6, width: 14, height: 14)
         spinner.isHidden = true
         addSubview(spinner)
 
         titleLabel.font = NSFont.menuFont(ofSize: 0)
         titleLabel.textColor = .labelColor
-        titleLabel.frame = NSRect(x: 34, y: 4, width: max(bounds.width - 44, 180), height: 18)
+        titleLabel.frame = NSRect(x: 28, y: 4, width: max(bounds.width - 38, 180), height: 18)
         titleLabel.autoresizingMask = [.width]
         addSubview(titleLabel)
 
@@ -1618,6 +1783,11 @@ final class StrategySpeedHeaderView: NSView {
         if let sv = superview, sv.bounds.width > 0 && abs(frame.size.width - sv.bounds.width) > 0.5 {
             frame.size.width = sv.bounds.width
         }
+        let height = bounds.height
+        let iconY = (height - 14) / 2
+        iconView.frame = NSRect(x: 8, y: iconY, width: 14, height: 14)
+        spinner.frame = NSRect(x: 8, y: iconY, width: 14, height: 14)
+        titleLabel.frame = NSRect(x: 28, y: (height - 18) / 2, width: max(bounds.width - 36, 180), height: 18)
     }
 
     override func updateTrackingAreas() {
@@ -1638,7 +1808,7 @@ final class StrategySpeedHeaderView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         if isHighlighted {
-            NSColor.selectedContentBackgroundColor.setFill()
+            NSColor.quaternaryLabelColor.withAlphaComponent(0.2).setFill()
             let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 4, dy: 1), xRadius: 4.5, yRadius: 4.5)
             path.fill()
         }
@@ -1651,28 +1821,24 @@ final class StrategySpeedHeaderView: NSView {
             iconView.isHidden = true
             spinner.isHidden = false
             spinner.startAnimation(nil)
-            titleLabel.textColor = isHighlighted ? .selectedMenuItemTextColor : .systemBlue
+            titleLabel.textColor = .systemBlue
         } else {
             spinner.stopAnimation(nil)
             spinner.isHidden = true
             iconView.isHidden = false
-            iconView.contentTintColor = isHighlighted ? .selectedMenuItemTextColor : .labelColor
-            titleLabel.textColor = isHighlighted ? .selectedMenuItemTextColor : .labelColor
+            iconView.contentTintColor = .labelColor
+            titleLabel.textColor = .labelColor
         }
         needsDisplay = true
     }
 
     override func mouseEntered(with event: NSEvent) {
         isHighlighted = true
-        titleLabel.textColor = .selectedMenuItemTextColor
-        iconView.contentTintColor = .selectedMenuItemTextColor
         needsDisplay = true
     }
 
     override func mouseExited(with event: NSEvent) {
         isHighlighted = false
-        titleLabel.textColor = isTesting ? .systemBlue : .labelColor
-        iconView.contentTintColor = isTesting ? .systemBlue : .labelColor
         needsDisplay = true
     }
 
