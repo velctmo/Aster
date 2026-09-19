@@ -10,6 +10,8 @@ public struct ActivityDashboardView: View {
     @State private var connectionFilter: String = "all" // "all" | "proxy" | "direct"
     @State private var connectionSearchText: String = ""
     @State private var topContentHeight: CGFloat = 340
+    @State private var selectedConnection: ConnectionItem? = nil
+    @State private var showRuleEvaluator: Bool = false
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -43,6 +45,24 @@ public struct ActivityDashboardView: View {
                 .padding(.horizontal, DesignTokens.pagePadding)
                 .padding(.bottom, 12)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+        }
+        .onExitCommand {
+            if selectedConnection != nil {
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    selectedConnection = nil
+                }
+            }
+        }
+        .background {
+            if selectedConnection != nil {
+                Button("") {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        selectedConnection = nil
+                    }
+                }
+                .keyboardShortcut(.cancelAction)
+                .opacity(0)
             }
         }
         .onAppear {
@@ -693,8 +713,9 @@ public struct ActivityDashboardView: View {
     // D. 实时网络连接流与活跃应用 (根据剩余可用高度自适应展示，杜绝全页纵向滚动条)
     private func liveConnectionsStreamSection(availableHeight: CGFloat) -> some View {
         let filteredList = filteredLiveConnections
+        let evaluatorOffset: CGFloat = showRuleEvaluator ? 45 : 0
         // 根据可用高度动态计算最多容纳的行数 (每行约 34pt，表头与底栏约 70pt，自适应 2~8 行)
-        let maxDisplayRows = max(min(Int((availableHeight - 70) / 34), 8), 2)
+        let maxDisplayRows = max(min(Int((availableHeight - 70 - evaluatorOffset) / 34), 8), 2)
         let displayList = Array(filteredList.prefix(maxDisplayRows))
 
         return VStack(alignment: .leading, spacing: 8) {
@@ -719,6 +740,29 @@ public struct ActivityDashboardView: View {
                 connectionSearchField
                     .frame(maxWidth: 200)
 
+                // ⚡️ 规则测试 切换按钮
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        showRuleEvaluator.toggle()
+                    }
+                }) {
+                    HStack(spacing: 4) {
+                        Text("⚡️ 规则测试")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4.5)
+                    .background(showRuleEvaluator ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.06))
+                    .foregroundColor(showRuleEvaluator ? .accentColor : .primary)
+                    .clipShape(.rect(cornerRadius: 6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .strokeBorder(showRuleEvaluator ? Color.accentColor.opacity(0.35) : Color.clear, lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+                .help("展开或收起分流规则即时仿真测试条")
+
                 Spacer(minLength: 0)
 
                 // 显式引导：完整日志入口 (与快捷键 ⌘D 呼应)
@@ -742,7 +786,13 @@ public struct ActivityDashboardView: View {
                 .help("打开独立网络请求日志与诊断窗口 (⌘D)")
             }
 
-            // 连接数据卡片
+            // 规则即时仿真测试条
+            if showRuleEvaluator {
+                RuleEvaluatorBar()
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            // 连接数据卡片与抽屉联动
             if filteredList.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: state.status.running ? "waveform.path.ecg" : "network.slash")
@@ -760,75 +810,111 @@ public struct ActivityDashboardView: View {
                 )
                 .liquidGlassBorder(cornerRadius: 10)
             } else {
-                VStack(spacing: 0) {
-                    // 表头 (极简规范对齐)
-                    HStack(spacing: 12) {
-                        Text("应用 / 进程")
-                            .font(.system(size: 10.5, weight: .semibold))
-                            .foregroundColor(.secondary)
-                            .frame(width: 130, alignment: .leading)
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(spacing: 0) {
+                        // 表头 (极简规范对齐)
+                        HStack(spacing: 12) {
+                            Text("应用 / 进程")
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .foregroundColor(.secondary)
+                                .frame(width: 115, alignment: .leading)
 
-                        Text("目标地址")
-                            .font(.system(size: 10.5, weight: .semibold))
-                            .foregroundColor(.secondary)
-                            .frame(minWidth: 160, maxWidth: .infinity, alignment: .leading)
+                            Text("目标地址")
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .foregroundColor(.secondary)
+                                .frame(minWidth: 120, maxWidth: .infinity, alignment: .leading)
 
-                        Text("命中分流规则")
-                            .font(.system(size: 10.5, weight: .semibold))
-                            .foregroundColor(.secondary)
-                            .frame(width: 120, alignment: .leading)
+                            Text("命中分流规则")
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .foregroundColor(.secondary)
+                                .frame(width: 100, alignment: .leading)
 
-                        Text("出站链路")
-                            .font(.system(size: 10.5, weight: .semibold))
-                            .foregroundColor(.secondary)
-                            .frame(width: 110, alignment: .leading)
+                            Text("出站链路")
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .foregroundColor(.secondary)
+                                .frame(width: 95, alignment: .leading)
 
-                        Text("累计流量")
-                            .font(.system(size: 10.5, weight: .semibold))
-                            .foregroundColor(.secondary)
-                            .frame(width: 90, alignment: .trailing)
+                            Text("累计流量")
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .foregroundColor(.secondary)
+                                .frame(width: 75, alignment: .trailing)
 
-                        Text("状态")
-                            .font(.system(size: 10.5, weight: .semibold))
-                            .foregroundColor(.secondary)
-                            .frame(width: 35, alignment: .center)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 7)
-                    .background(Color.primary.opacity(0.025))
+                            Text("状态")
+                                .font(.system(size: 10.5, weight: .semibold))
+                                .foregroundColor(.secondary)
+                                .frame(width: 80, alignment: .trailing)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(Color.primary.opacity(0.025))
 
-                    Divider().opacity(0.2)
+                        Divider().opacity(0.2)
 
-                    // 动态自适应行数
-                    ForEach(displayList) { conn in
-                        LiveConnectionRow(conn: conn)
-                        if conn.id != displayList.last?.id {
-                            Divider().opacity(0.18).padding(.leading, 14)
+                        // 动态自适应行数
+                        ForEach(displayList) { conn in
+                            LiveConnectionRow(
+                                conn: conn,
+                                isSelected: selectedConnection?.id == conn.id,
+                                onSelect: {
+                                    withAnimation(.easeInOut(duration: 0.22)) {
+                                        if selectedConnection?.id == conn.id {
+                                            selectedConnection = nil
+                                        } else {
+                                            selectedConnection = conn
+                                        }
+                                    }
+                                }
+                            )
+                            if conn.id != displayList.last?.id {
+                                Divider().opacity(0.18).padding(.leading, 14)
+                            }
+                        }
+
+                        // 底部优雅说明条 (仅作状态流向指引，保留右上角唯一 ⌘D 入口)
+                        Divider().opacity(0.2)
+                        HStack {
+                            Image(systemName: "info.circle")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary.opacity(0.8))
+                            Text("实时看板仅展示活跃连接 (前 \(displayList.count)/\(filteredList.count) 条) · 完整流向与历史审计请通过右上角 ⌘D 网络日志审查")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+
+                            Spacer()
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .background(Color.primary.opacity(0.015))
+                        .contentShape(Rectangle())
+                        .onTapGesture {
+                            if selectedConnection != nil {
+                                withAnimation(.easeInOut(duration: 0.22)) {
+                                    selectedConnection = nil
+                                }
+                            }
                         }
                     }
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(.ultraThinMaterial)
+                    )
+                    .liquidGlassBorder(cornerRadius: 10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                    // 底部优雅说明条 (仅作状态流向指引，保留右上角唯一 ⌘D 入口)
-                    Divider().opacity(0.2)
-                    HStack {
-                        Image(systemName: "info.circle")
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary.opacity(0.8))
-                        Text("实时看板仅展示活跃连接 (前 \(displayList.count)/\(filteredList.count) 条) · 完整流向与历史审计请通过右上角 ⌘D 网络日志审查")
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
-
-                        Spacer()
+                    if let selected = selectedConnection {
+                        let activeConn = filteredList.first(where: { $0.id == selected.id }) ?? state.connections.first(where: { $0.id == selected.id }) ?? selected
+                        ConnectionDetailDrawer(conn: activeConn, onClose: {
+                            withAnimation(.easeInOut(duration: 0.22)) {
+                                selectedConnection = nil
+                            }
+                        })
+                        .frame(maxHeight: max(availableHeight - evaluatorOffset - 40, 260))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .liquidGlassBorder(cornerRadius: 10)
+                        .shadow(color: Color.black.opacity(0.08), radius: 10, x: -2, y: 2)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .background(Color.primary.opacity(0.015))
                 }
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(.ultraThinMaterial)
-                )
-                .liquidGlassBorder(cornerRadius: 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
@@ -857,6 +943,20 @@ public struct ActivityDashboardView: View {
 public struct LiveConnectionRow: View {
     @ObservedObject var state = AsterState.shared
     public var conn: ConnectionItem
+    public var isSelected: Bool
+    public var onSelect: () -> Void
+
+    @State private var isHovered: Bool = false
+
+    public init(
+        conn: ConnectionItem,
+        isSelected: Bool = false,
+        onSelect: @escaping () -> Void = {}
+    ) {
+        self.conn = conn
+        self.isSelected = isSelected
+        self.onSelect = onSelect
+    }
 
     public var body: some View {
         HStack(spacing: 12) {
@@ -871,7 +971,7 @@ public struct LiveConnectionRow: View {
                     .foregroundColor(.primary)
                     .lineLimit(1)
             }
-            .frame(width: 130, alignment: .leading)
+            .frame(width: 115, alignment: .leading)
 
             // 目标地址 (Host:Port)
             HStack(spacing: 4) {
@@ -882,7 +982,7 @@ public struct LiveConnectionRow: View {
                     .foregroundColor(.primary.opacity(0.9))
                     .lineLimit(1)
             }
-            .frame(minWidth: 160, maxWidth: .infinity, alignment: .leading)
+            .frame(minWidth: 120, maxWidth: .infinity, alignment: .leading)
 
             // 命中分流规则 (克制单色微胶囊)
             HStack(spacing: 4) {
@@ -897,14 +997,14 @@ public struct LiveConnectionRow: View {
                     .clipShape(.rect(cornerRadius: 3.5))
                     .lineLimit(1)
             }
-            .frame(width: 120, alignment: .leading)
+            .frame(width: 100, alignment: .leading)
 
             // 出站链路 / 节点
             HStack(spacing: 4) {
                 let chain = conn.chains?.last ?? (conn.rule == "direct" ? "DIRECT" : "Proxy")
                 ActionBadge(action: chain)
             }
-            .frame(width: 110, alignment: .leading)
+            .frame(width: 95, alignment: .leading)
 
             // 累计流量 (等宽紧凑低调排版)
             HStack(spacing: 4) {
@@ -912,19 +1012,35 @@ public struct LiveConnectionRow: View {
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.primary.opacity(0.85))
             }
-            .frame(width: 90, alignment: .trailing)
+            .frame(width: 75, alignment: .trailing)
 
-            // 活跃状态指示点 (5pt 微点)
+            // 状态诊断徽标
             HStack {
-                Circle()
-                    .fill(conn.isClosed == true ? Color.secondary.opacity(0.35) : Color.green)
-                    .frame(width: 5.5, height: 5.5)
+                ConnectionDiagnosticBadge(conn: conn)
             }
-            .frame(width: 35, alignment: .center)
+            .frame(width: 80, alignment: .trailing)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
+        .background(
+            isSelected
+                ? Color.accentColor.opacity(0.12)
+                : (isHovered ? Color.primary.opacity(0.04) : Color.clear)
+        )
+        .overlay(alignment: .leading) {
+            if isSelected {
+                Rectangle()
+                    .fill(Color.accentColor)
+                    .frame(width: 3)
+            }
+        }
         .contentShape(Rectangle())
+        .onTapGesture {
+            onSelect()
+        }
+        .onHover { hovering in
+            isHovered = hovering
+        }
         .contextMenu {
             let host = conn.metadata?.host ?? conn.metadata?.destinationIP ?? ""
             let target = conn.effectiveTarget
@@ -962,6 +1078,224 @@ public struct LiveConnectionRow: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - 嵌入式规则即时仿真测试条
+public struct RuleEvaluatorBar: View {
+    @ObservedObject var state = AsterState.shared
+    @State private var targetInput: String = ""
+    @State private var isEvaluating: Bool = false
+    @State private var evalResult: RuleEvaluateResult? = nil
+    @State private var errorMessage: String? = nil
+
+    public init() {}
+
+    public var body: some View {
+        VStack(spacing: 8) {
+            // 输入与操作栏
+            HStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "bolt.badge.magnifyingglass")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+
+                    TextField("输入域名、IP 或 URL 进行分流规则仿真（如 v.qq.com 或 1.1.1.1）…", text: $targetInput)
+                        .font(.system(size: 11))
+                        .textFieldStyle(.plain)
+                        .onSubmit {
+                            performEvaluation()
+                        }
+
+                    if !targetInput.isEmpty {
+                        Button(action: {
+                            targetInput = ""
+                            evalResult = nil
+                            errorMessage = nil
+                        }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .help("清空输入")
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4.5)
+                .background(Color(NSColor.controlBackgroundColor).opacity(0.85))
+                .clipShape(.rect(cornerRadius: 6))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.8)
+                )
+
+                Button(action: {
+                    performEvaluation()
+                }) {
+                    HStack(spacing: 3.5) {
+                        if isEvaluating {
+                            ProgressView()
+                                .controlSize(.mini)
+                        } else {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 8.5))
+                        }
+                        Text("测试")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .frame(minWidth: 50, minHeight: 22)
+                }
+                .buttonStyle(.exquisitePrimary)
+                .disabled(targetInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isEvaluating)
+            }
+
+            // 结果微卡片或提示
+            if let result = evalResult {
+                resultMicroCard(result)
+            } else if let error = errorMessage {
+                errorNotice(error)
+            }
+        }
+        .padding(9)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(NSColor.controlBackgroundColor).opacity(0.45))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(Color.primary.opacity(0.07), lineWidth: 0.8)
+        )
+    }
+
+    private func performEvaluation() {
+        let trimmed = targetInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        isEvaluating = true
+        errorMessage = nil
+
+        Task {
+            do {
+                let res = try await state.evaluateRule(target: trimmed)
+                await MainActor.run {
+                    self.evalResult = res
+                    self.isEvaluating = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.errorMessage = error.localizedDescription
+                    self.evalResult = nil
+                    self.isEvaluating = false
+                }
+            }
+        }
+    }
+
+    private func resultMicroCard(_ result: RuleEvaluateResult) -> some View {
+        Group {
+            if result.matched {
+                HStack(spacing: 12) {
+                    // 左侧：命中规则类型与 Payload
+                    HStack(spacing: 6) {
+                        Text(result.ruleType.isEmpty ? "RULE" : result.ruleType)
+                            .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.accentColor.opacity(0.12))
+                            .foregroundColor(.accentColor)
+                            .clipShape(.rect(cornerRadius: 4))
+
+                        Text(result.payload.isEmpty ? targetInput : result.payload)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    // 中间：出站策略
+                    HStack(spacing: 5) {
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.secondary.opacity(0.7))
+                        ActionBadge(action: result.outbound)
+                    }
+
+                    Spacer(minLength: 8)
+
+                    // 右侧：落地节点与评估耗时
+                    HStack(spacing: 8) {
+                        if !result.selectedNode.isEmpty {
+                            HStack(spacing: 4) {
+                                Image(systemName: "server.rack")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(.secondary)
+                                Text(result.selectedNode)
+                                    .font(.system(size: 10.5, weight: .medium))
+                                    .foregroundStyle(.primary.opacity(0.9))
+                                    .lineLimit(1)
+                            }
+                        }
+
+                        Text(String(format: "%.1fms", result.evaluationTimeMs))
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.primary.opacity(0.04))
+                            .clipShape(.rect(cornerRadius: 3.5))
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.primary.opacity(0.03))
+                .clipShape(.rect(cornerRadius: 6))
+            } else {
+                unhitNotice(result)
+            }
+        }
+    }
+
+    private func unhitNotice(_ result: RuleEvaluateResult) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "info.circle.fill")
+                .font(.system(size: 11.5))
+                .foregroundColor(.secondary)
+            Text("未命中任何显式规则 · 降级走默认出站策略：")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+            ActionBadge(action: result.outbound.isEmpty ? "DIRECT" : result.outbound)
+            if !result.selectedNode.isEmpty {
+                Text("(\(result.selectedNode))")
+                    .font(.system(size: 10.5))
+                    .foregroundColor(.secondary)
+            }
+            Spacer()
+            Text(String(format: "%.1fms", result.evaluationTimeMs))
+                .font(.system(size: 10, weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.primary.opacity(0.03))
+        .clipShape(.rect(cornerRadius: 6))
+    }
+
+    private func errorNotice(_ error: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11))
+                .foregroundColor(.orange)
+            Text("规则仿真异常: \(error)")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.orange.opacity(0.08))
+        .clipShape(.rect(cornerRadius: 6))
     }
 }
 
