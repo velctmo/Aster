@@ -9,7 +9,9 @@ plist="/Library/LaunchDaemons/${label}.plist"
 runtime="/Library/Application Support/Aster/runtime"
 singbox="/Library/Application Support/Aster/cores/sing-box"
 
-install -d -o root -g wheel -m 700 "/Library/Application Support/Aster" "$runtime" "/Library/Application Support/Aster/cores"
+install -d -o root -g wheel -m 755 "/Library/Application Support/Aster" "/Library/Application Support/Aster/cores"
+install -d -o root -g wheel -m 700 "$runtime"
+chmod 755 "/Library/Application Support/Aster" "/Library/Application Support/Aster/cores"
 console_uid="$(stat -f '%u' /dev/console)"
 if [[ "$console_uid" -le 0 ]]; then
   echo "Aster installation requires a logged-in console user" >&2
