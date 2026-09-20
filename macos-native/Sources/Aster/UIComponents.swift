@@ -221,6 +221,14 @@ extension AppMode {
         case .direct: return Color(red: 0.88, green: 0.62, blue: 0.22)
         }
     }
+
+    public var nsColor: NSColor {
+        switch self {
+        case .rule: return NSColor(srgbRed: 0.22, green: 0.72, blue: 0.48, alpha: 1.0)
+        case .global: return NSColor(srgbRed: 0.0, green: 0.48, blue: 1.0, alpha: 1.0)
+        case .direct: return NSColor(srgbRed: 0.88, green: 0.62, blue: 0.22, alpha: 1.0)
+        }
+    }
 }
 
 // MARK: - 统一延迟格式化与高敏色阶系统 (LatencyFormatter)

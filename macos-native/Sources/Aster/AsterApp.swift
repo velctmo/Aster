@@ -5,71 +5,81 @@ import Darwin
 @preconcurrency import UserNotifications
 
 @MainActor
-private enum AsterStatusGlyph {
+public enum ModeBadgeHelper {
+    public static func image(for mode: String) -> NSImage {
+        let size = NSSize(width: 17, height: 17)
+        let img = NSImage(size: size)
+        img.lockFocus()
+
+        let appMode = AppMode.from(string: mode)
+        let letter = String(appMode.code.prefix(1))
+        let bgColor = appMode.nsColor
+
+        let rect = NSRect(origin: .zero, size: size)
+        bgColor.setFill()
+        let path = NSBezierPath(roundedRect: rect, xRadius: 3.5, yRadius: 3.5)
+        path.fill()
+
+        let font = NSFont.systemFont(ofSize: 11, weight: .bold)
+        let attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: NSColor.white
+        ]
+        let str = NSAttributedString(string: letter, attributes: attrs)
+        let strSize = str.size()
+        let strRect = NSRect(
+            x: (size.width - strSize.width) / 2,
+            y: (size.height - strSize.height) / 2 - 0.5,
+            width: strSize.width,
+            height: strSize.height
+        )
+        str.draw(in: strRect)
+
+        img.unlockFocus()
+        return img
+    }
+}
+
+@MainActor
+private enum NetworkWaveformGlyph {
     static func draw(running: Bool, in rect: NSRect) {
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
-        var transform = AffineTransform.identity
-        transform.translate(x: rect.minX, y: rect.minY)
-        transform.scale(x: rect.width / 16, y: rect.height / 16)
-        let path = cursiveAS()
-        path.transform(using: transform)
-        path.lineWidth = (running ? 1.65 : 1.35) * min(rect.width, rect.height) / 16
-        path.lineCapStyle = .round
-        path.lineJoinStyle = .round
-        NSColor.labelColor.setStroke()
-        path.stroke()
-    }
 
-    private static func cursiveAS() -> NSBezierPath {
-        let path = NSBezierPath()
-        path.move(to: NSPoint(x: 0.6, y: 10.6))
-        path.curve(
-            to: NSPoint(x: 8.1, y: 4),
-            controlPoint1: NSPoint(x: 3.2, y: 8.6),
-            controlPoint2: NSPoint(x: 6.2, y: 4.8)
-        )
-        path.curve(
-            to: NSPoint(x: 9.1, y: 6.6),
-            controlPoint1: NSPoint(x: 8.8, y: 3.6),
-            controlPoint2: NSPoint(x: 9.4, y: 4.6)
-        )
-        path.curve(
-            to: NSPoint(x: 6.2, y: 9.8),
-            controlPoint1: NSPoint(x: 8.9, y: 8),
-            controlPoint2: NSPoint(x: 7.8, y: 9.4)
-        )
-        path.curve(
-            to: NSPoint(x: 8.5, y: 6.2),
-            controlPoint1: NSPoint(x: 5.2, y: 10.1),
-            controlPoint2: NSPoint(x: 6.2, y: 8.4)
-        )
-        path.curve(
-            to: NSPoint(x: 13.1, y: 5.5),
-            controlPoint1: NSPoint(x: 9.6, y: 5),
-            controlPoint2: NSPoint(x: 11.8, y: 4.7)
-        )
-        path.curve(
-            to: NSPoint(x: 12.4, y: 7.4),
-            controlPoint1: NSPoint(x: 14, y: 6),
-            controlPoint2: NSPoint(x: 13.8, y: 6.9)
-        )
-        path.curve(
-            to: NSPoint(x: 9.6, y: 8.8),
-            controlPoint1: NSPoint(x: 11, y: 7.8),
-            controlPoint2: NSPoint(x: 9.9, y: 8.4)
-        )
-        path.curve(
-            to: NSPoint(x: 14, y: 9.3),
-            controlPoint1: NSPoint(x: 11, y: 9),
-            controlPoint2: NSPoint(x: 13.4, y: 8.8)
-        )
-        path.curve(
-            to: NSPoint(x: 12, y: 10.9),
-            controlPoint1: NSPoint(x: 14.6, y: 9.8),
-            controlPoint2: NSPoint(x: 14.1, y: 10.8)
-        )
-        return path
+        let tintColor: NSColor = running ? .labelColor : NSColor.labelColor.withAlphaComponent(0.35)
+        tintColor.setFill()
+
+        let scale = min(rect.width, rect.height) / 16.0
+        let barW: CGFloat = 2.0 * scale
+        let corner: CGFloat = 1.0 * scale
+        let baseline = rect.maxY - 1.5 * scale
+
+        // 4 proportional equalizer waveform bars (Surge signature waveform)
+        let h1: CGFloat = 6.5 * scale
+        let r1 = NSRect(x: rect.minX + 0.8 * scale, y: baseline - h1, width: barW, height: h1)
+        NSBezierPath(roundedRect: r1, xRadius: corner, yRadius: corner).fill()
+
+        let h2: CGFloat = 13.5 * scale
+        let r2 = NSRect(x: rect.minX + 4.2 * scale, y: baseline - h2, width: barW, height: h2)
+        NSBezierPath(roundedRect: r2, xRadius: corner, yRadius: corner).fill()
+
+        let h3: CGFloat = 5.0 * scale
+        let r3 = NSRect(x: rect.minX + 7.6 * scale, y: baseline - h3, width: barW, height: h3)
+        NSBezierPath(roundedRect: r3, xRadius: corner, yRadius: corner).fill()
+
+        let h4: CGFloat = 10.0 * scale
+        let r4 = NSRect(x: rect.minX + 11.0 * scale, y: baseline - h4, width: barW, height: h4)
+        NSBezierPath(roundedRect: r4, xRadius: corner, yRadius: corner).fill()
+
+        // Top-right running beacon dot
+        let dotSize: CGFloat = 2.6 * scale
+        let dotRect = NSRect(x: rect.minX + 13.6 * scale, y: rect.minY + 1.2 * scale, width: dotSize, height: dotSize)
+        if running {
+            NSColor(srgbRed: 0.22, green: 0.72, blue: 0.48, alpha: 1.0).setFill()
+        } else {
+            NSColor.secondaryLabelColor.withAlphaComponent(0.3).setFill()
+        }
+        NSBezierPath(ovalIn: dotRect).fill()
     }
 }
 
@@ -104,7 +114,7 @@ private final class StatusItemDisplayView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let glyphY = (bounds.height - 16) / 2
-        AsterStatusGlyph.draw(running: running, in: NSRect(x: 1, y: glyphY, width: 16, height: 16))
+        NetworkWaveformGlyph.draw(running: running, in: NSRect(x: 1, y: glyphY, width: 16, height: 16))
         guard showSpeed else { return }
         let textX: CGFloat = 18
         let textWidth = max(bounds.width - textX, 0)
@@ -569,206 +579,139 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         isMenuOpen = false
     }
 
-    // MARK: - 动态组装原生菜单项 (按使用频度重构：高频核心控制置顶 + 节点列表居中平铺 + 辅助工具与退出置底)
+    // MARK: - 动态组装原生状态栏菜单 (完全对标 Surge macOS 规范)
     public func buildStatusMenu(_ menu: NSMenu) {
         menu.removeAllItems()
         let state = AsterState.shared
 
-        // ==========================================
-        // 1. 顶部高频控制区（快捷键体系规范：⌘M / ⌘D / ⌘S / ⌘E）
-        // ==========================================
-        menu.addItem(makeStickyItem(title: "显示主窗口", icon: "macwindow") { [weak self] in
-            self?.onOpenDashboard()
-        })
-
-        // 出站分流模式（指示标 + 快捷切换，专业英文全大写）
-        let (modeBadge): (String) = {
-            switch state.status.mode {
-            case "global": return "GLOBAL"
-            case "direct": return "DIRECT"
-            default: return "RULE"
-            }
-        }()
-        let modeRootItem = NSMenuItem(title: "出站模式", action: nil, keyEquivalent: "")
-        modeRootItem.identifier = NSUserInterfaceItemIdentifier("aster.outbound-mode")
-        let modeImage = NSImage(systemSymbolName: "arrow.triangle.branch", accessibilityDescription: "出站模式")
-        modeImage?.isTemplate = true
-        modeRootItem.image = modeImage
-        
-        let modeAttr = NSMutableAttributedString(string: "出站模式", attributes: [
-            .font: NSFont.menuFont(ofSize: 0),
-            .foregroundColor: NSColor.labelColor
-        ])
-        modeAttr.append(NSAttributedString(string: "   [\(modeBadge)]", attributes: [
-            .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .bold),
-            .foregroundColor: NSColor.controlAccentColor
-        ]))
-        modeRootItem.attributedTitle = modeAttr
-
-        let modeMenu = NSMenu(title: "出站模式")
-        modeMenu.autoenablesItems = false
-        for appMode in AppMode.allCases {
-            modeMenu.addItem(makeStickyItem(
-                title: "\(appMode.title) (\(appMode.code))",
-                icon: appMode.icon,
-                checked: state.status.mode == appMode.rawValue,
-                kind: .mode(appMode.rawValue)
-            ) { AsterState.shared.setMode(appMode.rawValue) })
-        }
-
-        modeRootItem.submenu = modeMenu
-        menu.addItem(modeRootItem)
+        // 1. 显示主窗口 ⌘M
+        let showMainItem = NSMenuItem(title: "显示主窗口", action: #selector(onBringAllFront), keyEquivalent: "m")
+        showMainItem.target = self
+        menu.addItem(showMainItem)
 
         menu.addItem(NSMenuItem.separator())
 
-        // ==========================================
-        // 2. 策略组列表（右侧展示当前选中节点，不堆砌生硬符号）
-        // ==========================================
+        // 2. 出站模式 [R] >
+        let mode = state.status.mode
+        let modeItem = NSMenuItem(title: "出站模式", action: nil, keyEquivalent: "")
+        modeItem.identifier = NSUserInterfaceItemIdentifier("aster.outbound-mode")
+        updateModeMenuTitle(modeItem, mode: mode)
+
+        let modeMenu = NSMenu(title: "出站模式")
+        modeMenu.autoenablesItems = false
+
+        let ruleItem = NSMenuItem(title: "规则分流 (Rule)", action: #selector(onSetModeRule), keyEquivalent: "")
+        ruleItem.target = self
+        ruleItem.state = (mode == "rule") ? .on : .off
+        modeMenu.addItem(ruleItem)
+
+        let globalItem = NSMenuItem(title: "全局代理 (Global)", action: #selector(onSetModeGlobal), keyEquivalent: "")
+        globalItem.target = self
+        globalItem.state = (mode == "global") ? .on : .off
+        modeMenu.addItem(globalItem)
+
+        let directItem = NSMenuItem(title: "直接连接 (Direct)", action: #selector(onSetModeDirect), keyEquivalent: "")
+        directItem.target = self
+        directItem.state = (mode == "direct") ? .on : .off
+        modeMenu.addItem(directItem)
+
+        modeItem.submenu = modeMenu
+        menu.addItem(modeItem)
+
+        // 3. 为当前网页设置规则…
+        let addRuleItem = NSMenuItem(title: "为当前网页设置规则…", action: #selector(onAddRuleForWebpage), keyEquivalent: "")
+        addRuleItem.target = self
+        menu.addItem(addRuleItem)
+
+        menu.addItem(NSMenuItem.separator())
+
+        // 4. 策略组列表（纯文本无多余图标、左侧平齐、右侧次级色显示当前选中节点与国旗）
         let displayGroups = state.visibleStrategyGroups
         for group in displayGroups {
-            let selectedLabel = state.selectedLabel(in: group)
-            let nowLabel = selectedLabel.isEmpty ? "" : "   [\(selectedLabel.truncated(toVisualWidth: 14))]"
             let strategyItem = NSMenuItem(title: group.name, action: nil, keyEquivalent: "")
-            let groupIcon: String = {
-                if group.tag == "proxy" || group.name.contains("节点选择") {
-                    return "slider.horizontal.3"
-                } else if group.tag == "auto" || group.name.contains("自动") {
-                    return "bolt.horizontal.circle.fill"
-                } else if group.name.contains("港") || group.name.contains("HK") || group.name.contains("台") || group.name.contains("美") || group.name.contains("日") || group.name.contains("韩") || group.name.contains("新加坡") {
-                    return "globe.asia.australia.fill"
-                } else {
-                    return "arrow.triangle.branch"
-                }
-            }()
-            let groupImage = NSImage(systemSymbolName: groupIcon, accessibilityDescription: group.name)
-            groupImage?.isTemplate = true
-            strategyItem.image = groupImage
-
-            let titleAttr = NSMutableAttributedString(string: group.name, attributes: [
-                .font: NSFont.menuFont(ofSize: 0),
-                .foregroundColor: NSColor.labelColor
-            ])
-            if !nowLabel.isEmpty {
-                titleAttr.append(NSAttributedString(string: nowLabel, attributes: [
-                    .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular),
-                    .foregroundColor: NSColor.secondaryLabelColor
-                ]))
-            }
-            strategyItem.attributedTitle = titleAttr
+            strategyItem.identifier = NSUserInterfaceItemIdentifier("aster.group.\(group.tag)")
+            strategyItem.representedObject = group.tag
+            updateStrategyMenuItemTitle(strategyItem, group: group)
             strategyItem.submenu = makeStrategyMenu(group: group)
             menu.addItem(strategyItem)
         }
 
-        // ==========================================
-        // 3. 进程与客户端监控 (严格过滤无效/占位空进程)
-        // ==========================================
-        let validProcesses = state.topProcesses.filter { p in
-            let clean = p.name.trimmingCharacters(in: .whitespacesAndNewlines)
-            return !clean.isEmpty && clean != "-" && (p.upSpeed + p.downSpeed > 0)
-        }
+        menu.addItem(NSMenuItem.separator())
 
-        if !validProcesses.isEmpty {
-            menu.addItem(NSMenuItem.separator())
-            let procHeader = NSMenuItem(title: "进程与客户端", action: nil, keyEquivalent: "")
-            procHeader.isEnabled = false
-            menu.addItem(procHeader)
-
-            for proc in validProcesses.prefix(5) {
-                let totalSpeed = proc.upSpeed + proc.downSpeed
-                let speedStr = Formatters.speedString(totalSpeed)
-                let displayProcName = proc.name.truncated(toVisualWidth: 16)
-                let rawIcon = state.iconForProcess(path: proc.processPath ?? "", name: proc.name, size: 12)
-                let pItem = makeStickyItem(
-                    title: displayProcName,
-                    image: makeRoundedIcon(rawIcon, size: 12, cornerRadius: 2.5),
-                    accessory: speedStr,
-                    toolTip: "\(proc.name) (\(speedStr)) - 点击查看活跃连接与流量"
-                ) { [weak self] in
-                    AsterState.shared.activityFilterText = proc.name
-                    self?.showMainWindow(tab: .activity)
-                }
-                menu.addItem(pItem)
-            }
-        }
+        // 5. Aster 面板… ⌘D
+        let panelItem = NSMenuItem(title: "Aster 面板…", action: #selector(onOpenDashboard), keyEquivalent: "d")
+        panelItem.target = self
+        menu.addItem(panelItem)
 
         menu.addItem(NSMenuItem.separator())
 
-        // ==========================================
-        // 4. 网络控制与系统接管 (规范快捷键 ⌘D / ⌘S / ⌘E / ⌘C)
-        // ==========================================
-        menu.addItem(makeStickyItem(title: "请求日志…", icon: "list.bullet.rectangle.portrait") { [weak self] in
-            self?.showMainWindow(tab: .activity)
-        })
-
-        let sysProxyItem = makeStickyItem(
-            title: "设置为系统代理",
-            icon: "network",
-            kind: .capture(systemProxy: true)
-        ) { [weak self] in
-            self?.onToggleSystemProxy()
-        }
+        // 6. 设置为系统代理 ⌘S
+        let sysProxyItem = NSMenuItem(title: "设置为系统代理", action: #selector(onToggleSystemProxy), keyEquivalent: "s")
+        sysProxyItem.target = self
         statusBarSystemProxyItem = sysProxyItem
         menu.addItem(sysProxyItem)
 
-        let tunItem = makeStickyItem(
-            title: "虚拟网卡",
-            icon: "shield.lefthalf.filled",
-            kind: .capture(systemProxy: false)
-        ) { [weak self] in
-            self?.onToggleTun()
-        }
+        // 7. 增强模式 ⌘E
+        let tunItem = NSMenuItem(title: "增强模式", action: #selector(onToggleTun), keyEquivalent: "e")
+        tunItem.target = self
         statusBarTunItem = tunItem
         menu.addItem(tunItem)
         syncCaptureMenuItems()
 
-        menu.addItem(makeStickyItem(title: "复制终端代理命令", icon: "terminal") {
-            AsterState.shared.copyTerminalProxyCommand()
-        })
+        // 8. 复制终端代理命令 ⌘C
+        let copyCmdItem = NSMenuItem(title: "复制终端代理命令", action: #selector(onCopyTerminalCommand), keyEquivalent: "c")
+        copyCmdItem.target = self
+        menu.addItem(copyCmdItem)
 
         menu.addItem(NSMenuItem.separator())
 
-        // ==========================================
-        // 5. 配置与控制 (⌘R / 切换配置 / 重启应用 / 退出 ⌘Q)
-        // ==========================================
-        if !state.configs.isEmpty {
-            let activeConfigName = state.configs.first(where: { $0.active })?.name ?? (state.status.activeConfigName?.isEmpty == false ? state.status.activeConfigName! : "未激活配置")
-            let configRootItem = createMenuItem(title: "切换配置", icon: "doc.plaintext", action: nil)
-            configRootItem.identifier = NSUserInterfaceItemIdentifier("aster.active-config")
-            
-            let cfgAttr = NSMutableAttributedString(string: "切换配置", attributes: [
-                .font: NSFont.menuFont(ofSize: 0),
-                .foregroundColor: NSColor.labelColor
-            ])
-            cfgAttr.append(NSAttributedString(string: "   \(activeConfigName.truncated(toVisualWidth: 14))", attributes: [
-                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular),
-                .foregroundColor: NSColor.secondaryLabelColor
-            ]))
-            configRootItem.attributedTitle = cfgAttr
+        // 9. 功能 >
+        let featureRootItem = NSMenuItem(title: "功能", action: nil, keyEquivalent: "")
+        let featureMenu = NSMenu(title: "功能")
+        featureMenu.autoenablesItems = false
 
-            let configSubmenu = NSMenu(title: "切换配置")
+        let flushDNSItem = NSMenuItem(title: "清除 DNS 缓存", action: #selector(onFlushDNS), keyEquivalent: "")
+        flushDNSItem.target = self
+        featureMenu.addItem(flushDNSItem)
+
+        let testAllItem = NSMenuItem(title: "测试全部节点延迟", action: #selector(onSpeedtestAll), keyEquivalent: "")
+        testAllItem.target = self
+        featureMenu.addItem(testAllItem)
+
+        let restartCoreItem = NSMenuItem(title: "重载核心配置", action: #selector(onRestartCore), keyEquivalent: "r")
+        restartCoreItem.target = self
+        featureMenu.addItem(restartCoreItem)
+
+        let relaunchItem = NSMenuItem(title: "重启应用", action: #selector(onRelaunchApp), keyEquivalent: "")
+        relaunchItem.target = self
+        featureMenu.addItem(relaunchItem)
+
+        featureRootItem.submenu = featureMenu
+        menu.addItem(featureRootItem)
+
+        // 10. 配置 >
+        if !state.configs.isEmpty {
+            let configRootItem = NSMenuItem(title: "配置", action: nil, keyEquivalent: "")
+            configRootItem.identifier = NSUserInterfaceItemIdentifier("aster.config-menu")
+            let configSubmenu = NSMenu(title: "配置")
             configSubmenu.autoenablesItems = false
             for cfg in state.configs {
-                let symbol = cfg.kind == "subscription" ? "link.circle.fill" : "doc.text.fill"
-                configSubmenu.addItem(makeStickyItem(
-                    title: cfg.name.truncated(toVisualWidth: 26),
-                    icon: symbol,
-                    checked: cfg.active,
-                    kind: .config(cfg.id)
-                ) { [weak self] in
-                    self?.onSwitchProfileID(cfg.id)
-                })
+                let item = NSMenuItem(title: cfg.name, action: #selector(onSwitchProfile(_:)), keyEquivalent: "")
+                item.representedObject = cfg.id
+                item.target = self
+                item.state = cfg.active ? .on : .off
+                configSubmenu.addItem(item)
             }
             configRootItem.submenu = configSubmenu
             menu.addItem(configRootItem)
         }
 
-        menu.addItem(makeStickyItem(title: "重载配置", icon: "arrow.clockwise") { [weak self] in
-            self?.onRestartCore()
-        })
-        menu.addItem(createMenuItem(title: "重启应用", icon: "arrow.triangle.2.circlepath", action: #selector(onRelaunchApp)))
-
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(createMenuItem(title: "退出", icon: "power", action: #selector(onQuitApp), key: "q"))
+
+        // 11. 退出 ⌘Q
+        let quitItem = NSMenuItem(title: "退出", action: #selector(onQuitApp), keyEquivalent: "q")
+        quitItem.target = self
+        menu.addItem(quitItem)
     }
 
     func updateStatusItemTitle() {
@@ -859,241 +802,79 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
     private func updateLiveMenuItems(in menu: NSMenu) {
         let state = AsterState.shared
         for item in menu.items {
-            switch item.identifier?.rawValue {
-            case "aster.outbound-mode":
+            if item.identifier?.rawValue == "aster.outbound-mode" {
                 updateModeMenuTitle(item, mode: state.status.mode)
-            case "aster.active-config":
-                updateConfigMenuTitle(item, configs: state.configs)
-            default:
-                break
-            }
-            if let view = item.view as? StickyMenuItemView {
-                if case .capture(let systemProxy) = view.kind {
-                    applyCaptureState(to: item, systemProxy: systemProxy)
-                } else {
-                    refreshStickyView(view)
+                if let modeSub = item.submenu {
+                    modeSub.item(withTitle: "规则分流 (Rule)")?.state = (state.status.mode == "rule") ? .on : .off
+                    modeSub.item(withTitle: "全局代理 (Global)")?.state = (state.status.mode == "global") ? .on : .off
+                    modeSub.item(withTitle: "直接连接 (Direct)")?.state = (state.status.mode == "direct") ? .on : .off
                 }
+            } else if item.identifier?.rawValue == "aster.config-menu" {
+                if let cfgSub = item.submenu {
+                    for cfgItem in cfgSub.items {
+                        if let id = cfgItem.representedObject as? String {
+                            cfgItem.state = (state.configs.first(where: { $0.id == id })?.active == true) ? .on : .off
+                        }
+                    }
+                }
+            } else if let groupTag = item.representedObject as? String,
+                      let group = state.visibleStrategyGroups.first(where: { $0.tag == groupTag }) {
+                updateStrategyMenuItemTitle(item, group: group)
             }
             if let sub = item.submenu {
                 if let group = state.visibleStrategyGroups.first(where: { $0.name == sub.title || $0.tag == sub.title }) {
-                    let selectedLabel = state.selectedLabel(in: group)
-                    let nowLabel = selectedLabel.isEmpty ? "" : "   [\(selectedLabel.truncated(toVisualWidth: 14))]"
-                    let titleAttr = NSMutableAttributedString(string: group.name, attributes: [
-                        .font: NSFont.menuFont(ofSize: 0),
-                        .foregroundColor: NSColor.labelColor
-                    ])
-                    if !nowLabel.isEmpty {
-                        titleAttr.append(NSAttributedString(string: nowLabel, attributes: [
-                            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular),
-                            .foregroundColor: NSColor.secondaryLabelColor
-                        ]))
-                    }
-                    item.attributedTitle = titleAttr
-                    if item.image == nil {
-                        let groupIcon: String = {
-                            if group.tag == "proxy" || group.name.contains("节点选择") {
-                                return "slider.horizontal.3"
-                            } else if group.tag == "auto" || group.name.contains("自动") {
-                                return "bolt.horizontal.circle.fill"
-                            } else if group.name.contains("港") || group.name.contains("HK") || group.name.contains("台") || group.name.contains("美") || group.name.contains("日") || group.name.contains("韩") || group.name.contains("新加坡") {
-                                return "globe.asia.australia.fill"
-                            } else {
-                                return "arrow.triangle.branch"
-                            }
-                        }()
-                        let groupImage = NSImage(systemSymbolName: groupIcon, accessibilityDescription: group.name)
-                        groupImage?.isTemplate = true
-                        item.image = groupImage
-                    }
                     updateStrategySubmenuItems(sub, group: group)
-                } else {
-                    updateLiveMenuItems(in: sub)
                 }
             }
         }
+        applyCaptureState(to: statusBarSystemProxyItem, systemProxy: true)
+        applyCaptureState(to: statusBarTunItem, systemProxy: false)
     }
 
     private func updateModeMenuTitle(_ item: NSMenuItem, mode: String) {
-        let badge: String
-        switch mode {
-        case "global": badge = "GLOBAL"
-        case "direct": badge = "DIRECT"
-        default: badge = "RULE"
-        }
-        let title = NSMutableAttributedString(string: "出站模式", attributes: [
-            .font: NSFont.menuFont(ofSize: 0), .foregroundColor: NSColor.labelColor,
+        let badgeImg = ModeBadgeHelper.image(for: mode)
+        let attachment = NSTextAttachment()
+        attachment.image = badgeImg
+        attachment.bounds = NSRect(x: 0, y: -2.5, width: 17, height: 17)
+
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.tabStops = [
+            NSTextTab(textAlignment: .right, location: 240, options: [:])
+        ]
+
+        let titleAttr = NSMutableAttributedString(string: "出站模式\t", attributes: [
+            .font: NSFont.menuFont(ofSize: 0),
+            .foregroundColor: NSColor.labelColor,
+            .paragraphStyle: paragraphStyle
         ])
-        title.append(NSAttributedString(string: "   [\(badge)]", attributes: [
-            .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .bold),
-            .foregroundColor: NSColor.controlAccentColor,
-        ]))
-        item.attributedTitle = title
+        titleAttr.append(NSAttributedString(attachment: attachment))
+        item.attributedTitle = titleAttr
     }
 
-    private func updateConfigMenuTitle(_ item: NSMenuItem, configs: [ConfigProfileItem]) {
-        let activeName = configs.first(where: { $0.active })?.name ?? (AsterState.shared.status.activeConfigName?.isEmpty == false ? AsterState.shared.status.activeConfigName! : "未激活配置")
-        let title = NSMutableAttributedString(string: "切换配置", attributes: [
-            .font: NSFont.menuFont(ofSize: 0), .foregroundColor: NSColor.labelColor,
+    private func updateStrategyMenuItemTitle(_ item: NSMenuItem, group: StrategyGroup) {
+        let state = AsterState.shared
+        let selectedLabel = state.selectedLabel(in: group)
+        let cleanSelected = NodeNameSanitizer.clean(selectedLabel)
+        let fullSelected = cleanSelected.truncated(toVisualWidth: 16)
+
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.tabStops = [
+            NSTextTab(textAlignment: .right, location: 240, options: [:])
+        ]
+
+        let titleAttr = NSMutableAttributedString(string: "\(group.name)\t", attributes: [
+            .font: NSFont.menuFont(ofSize: 0),
+            .foregroundColor: NSColor.labelColor,
+            .paragraphStyle: paragraphStyle
         ])
-        title.append(NSAttributedString(string: "   \(activeName.truncated(toVisualWidth: 14))", attributes: [
-            .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular),
-            .foregroundColor: NSColor.secondaryLabelColor,
-        ]))
-        item.attributedTitle = title
-    }
-
-    private struct StrategyMemberPresentation {
-        let title: String
-        let accessory: String
-        let delayColor: NSColor
-        let attrAccessory: NSAttributedString
-        let checked: Bool
-        let enabled: Bool
-        let toolTip: String
-    }
-
-    private func protocolShortCode(for rawProtocol: String) -> String? {
-        let p = rawProtocol.trimmingCharacters(in: .whitespaces).lowercased()
-        switch p {
-        case "hysteria2", "hy2":
-            return "HY2"
-        case "hysteria", "hy":
-            return "HY"
-        case "tuic":
-            return "TUIC"
-        case "wireguard", "wg":
-            return "WG"
-        case "shadowtls", "shadow-tls":
-            return "STLS"
-        case "vless":
-            return "VLESS"
-        case "vmess":
-            return "VMESS"
-        case "trojan":
-            return "TROJAN"
-        case "shadowsocks", "ss":
-            return "SS"
-        case "socks", "socks5":
-            return "SOCKS5"
-        case "http", "https":
-            return "HTTP"
-        default:
-            if !p.isEmpty && p != "unknown" {
-                return p.uppercased()
-            }
-            return nil
+        if !fullSelected.isEmpty {
+            titleAttr.append(NSAttributedString(string: fullSelected, attributes: [
+                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular),
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .paragraphStyle: paragraphStyle
+            ]))
         }
-    }
-
-    private func nodeDelayColor(delay: Int, isTesting: Bool) -> NSColor {
-        LatencyFormatter.nsColor(delayMs: delay, isTesting: isTesting)
-    }
-
-    private func formatStrategyMember(group: StrategyGroup, tag: String) -> StrategyMemberPresentation {
-        let state = AsterState.shared
-        let isAuto = (tag == "auto")
-        let childGroup = isAuto ? nil : state.group(tagged: tag)
-        let node = state.findNode(for: tag)
-
-        let title: String
-        var toolTip: String
-
-        if isAuto {
-            let winner = state.autoWinnerName()
-            if let winner, !winner.isEmpty {
-                title = "自动优选 ➔ \(NodeNameSanitizer.clean(winner))"
-            } else {
-                title = "自动优选"
-            }
-            var tip = "自动测速并分流至最低延迟节点"
-            if let winner {
-                tip += " (当前命中: \(winner))"
-            }
-            toolTip = tip
-        } else if let childGroup {
-            let groupName = childGroup.name.isEmpty ? tag : childGroup.name
-            let cleanName = NodeNameSanitizer.clean(groupName)
-            title = cleanName.hasPrefix("[组]") ? cleanName : "[组] \(cleanName)"
-            var tip = "策略组: \(childGroup.name)"
-            if let now = childGroup.now, !now.isEmpty {
-                tip += " (当前选择: \(state.memberTitle(for: now)))"
-            }
-            toolTip = tip
-        } else if tag == "direct" {
-            title = "DIRECT"
-            toolTip = "直连出站"
-        } else if tag == "block" || tag == "reject" {
-            title = "REJECT"
-            toolTip = "阻断出站"
-        } else {
-            let rawTitle = state.memberTitle(for: tag)
-            if let proto = node?.protocolName, let badge = protocolShortCode(for: proto) {
-                let badgePrefix = "[\(badge)]"
-                if rawTitle.localizedCaseInsensitiveContains(badgePrefix) {
-                    title = rawTitle
-                } else {
-                    title = "\(badgePrefix) \(rawTitle)"
-                }
-            } else {
-                title = rawTitle
-            }
-            toolTip = title
-        }
-
-        let isTesting = state.isNodeTesting(tag) || (isAuto && state.isTestingGroup(group)) || state.isTestingDelays
-        let delay: Int = {
-            if let childGroup {
-                return childGroup.delayMs ?? state.memberDelay(for: tag)
-            }
-            return state.memberDelay(for: tag)
-        }()
-        let accessory = nodeDelayText(delay: delay, tag: tag, isTesting: isTesting)
-        let delayColor = nodeDelayColor(delay: delay, isTesting: isTesting)
-        let checked = state.isMemberSelected(group: group, tag: tag)
-        let enabled = state.canSelectMember(group: group, tag: tag)
-        let finalToolTip = toolTip.contains(accessory) ? toolTip : "\(toolTip)  \(accessory)"
-
-        let attrAccessory = NSAttributedString(
-            string: accessory,
-            attributes: [
-                .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
-                .foregroundColor: delayColor
-            ]
-        )
-
-        return StrategyMemberPresentation(
-            title: title,
-            accessory: accessory,
-            delayColor: delayColor,
-            attrAccessory: attrAccessory,
-            checked: checked,
-            enabled: enabled,
-            toolTip: finalToolTip
-        )
-    }
-
-    private func refreshStickyView(_ view: StickyMenuItemView) {
-        let state = AsterState.shared
-        switch view.kind {
-        case .mode(let mode):
-            view.apply(checked: state.status.mode == mode)
-        case .config(let id):
-            view.apply(checked: state.configs.first(where: { $0.id == id })?.active == true)
-        case .node(let groupTag, let tag):
-            guard let group = state.group(tagged: groupTag) else { return }
-            let p = formatStrategyMember(group: group, tag: tag)
-            view.apply(
-                title: p.title,
-                accessory: p.accessory,
-                accessoryColor: p.delayColor,
-                accessoryAttributedString: p.attrAccessory,
-                checked: p.checked,
-                enabled: p.enabled,
-                toolTip: p.toolTip
-            )
-        case .action, .capture:
-            break
-        }
+        item.attributedTitle = titleAttr
     }
 
     private func updateStrategySubmenuItems(_ sub: NSMenu, group: StrategyGroup) {
@@ -1110,25 +891,73 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
     }
 
     private func applyStrategyMemberItem(_ item: NSMenuItem, group: StrategyGroup, tag: String) {
-        let p = formatStrategyMember(group: group, tag: tag)
-        item.title = p.title.truncated(toVisualWidth: 26)
-        item.state = p.checked ? .on : .off
-        item.isEnabled = p.enabled
-        item.toolTip = p.toolTip
+        let state = AsterState.shared
+        let isAuto = (tag == "auto")
+        let isSpecial = (tag == "direct" || tag == "reject" || tag == "block")
+        let childGroup = isAuto ? nil : state.group(tagged: tag)
+
+        let title: String
+        var toolTip: String
+
+        if isAuto {
+            let winner = state.autoWinnerName()
+            let cleanWinner = winner.flatMap { NodeNameSanitizer.clean($0) }
+            if let cleanWinner, !cleanWinner.isEmpty {
+                title = "自动优选 ➔ \(cleanWinner)"
+            } else {
+                title = "自动优选"
+            }
+            var tip = "自动测速并分流至最低延迟节点"
+            if let cleanWinner {
+                tip += " (当前命中: \(cleanWinner))"
+            }
+            toolTip = tip
+        } else if let childGroup {
+            let groupName = childGroup.name.isEmpty ? tag : childGroup.name
+            title = NodeNameSanitizer.clean(groupName)
+            var tip = "策略组: \(childGroup.name)"
+            if let now = childGroup.now, !now.isEmpty {
+                tip += " (当前选择: \(state.memberTitle(for: now)))"
+            }
+            toolTip = tip
+        } else if tag == "direct" {
+            title = "DIRECT"
+            toolTip = "直连出站"
+        } else if tag == "block" || tag == "reject" {
+            title = "REJECT"
+            toolTip = "阻断出站"
+        } else {
+            let rawTitle = state.memberTitle(for: tag)
+            title = NodeNameSanitizer.clean(rawTitle)
+            toolTip = title
+        }
+
+        let isTesting = state.isNodeTesting(tag) || (isAuto && state.isTestingGroup(group)) || state.isTestingDelays
+        let delay: Int = {
+            if let childGroup {
+                return childGroup.delayMs ?? state.memberDelay(for: tag)
+            }
+            return state.memberDelay(for: tag)
+        }()
+
+        let checked = state.isMemberSelected(group: group, tag: tag)
+        let enabled = state.canSelectMember(group: group, tag: tag)
+
+        item.title = title
+        item.state = checked ? .on : .off
+        item.isEnabled = enabled
+        item.toolTip = toolTip
 
         if let view = item.view as? StickyMenuItemView {
             view.apply(
-                title: p.title,
-                accessory: p.accessory,
-                accessoryColor: p.delayColor,
-                accessoryAttributedString: p.attrAccessory,
-                checked: p.checked,
-                enabled: p.enabled,
-                toolTip: p.toolTip
+                title: title,
+                checked: checked,
+                enabled: enabled,
+                delay: delay,
+                isTesting: isTesting,
+                isSpecialOutbound: isSpecial,
+                toolTip: toolTip
             )
-        } else {
-            let delay = AsterState.shared.memberDelay(for: tag)
-            item.attributedTitle = nodeMenuTitle(name: p.title, tag: tag, delay: delay)
         }
     }
 
@@ -1136,7 +965,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         let nodeMenu = NSMenu(title: group.name)
         nodeMenu.autoenablesItems = false
 
-        // 1. 置顶延迟测试项 (采用 NSView 自定义按钮：点击时在菜单内原地触发测速，绝不触发 NSMenu 的 dismiss 动作)
+        // 1. 置顶延迟测试项 (纯文字无多余图标，右侧带 spinner，点击原地测速绝不关闭菜单)
         let isTesting = AsterState.shared.isTestingGroup(group)
         let headerView = StrategySpeedHeaderView(group: group, isTesting: isTesting) { [weak self] in
             self?.onTriggerStrategyGroupSpeedtest(group: group)
@@ -1157,25 +986,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         for tag in group.members {
             let item = NSMenuItem()
             item.representedObject = ["group": group.tag, "tag": tag]
-            let isAuto = (tag == "auto")
-            let icon: NSImage? = {
-                if isAuto {
-                    return NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: "自动优选")
-                } else if tag == "direct" {
-                    return NSImage(systemSymbolName: "arrow.up.right", accessibilityDescription: "直连")
-                } else if tag == "reject" || tag == "block" {
-                    return NSImage(systemSymbolName: "nosign", accessibilityDescription: "阻断")
-                } else if AsterState.shared.group(tagged: tag) != nil {
-                    return NSImage(systemSymbolName: "square.stack.3d.up", accessibilityDescription: "策略组")
-                }
-                return nil
-            }()
             let view = StickyMenuItemView(
-                title: "",
-                icon: icon,
                 kind: .node(group: group.tag, tag: tag)
-            ) { [weak self] in
+            ) { [weak self, weak item] in
                 self?.selectStrategyMember(groupTag: group.tag, tag: tag)
+                item?.menu?.cancelTracking()
             }
             item.view = view
             applyStrategyMemberItem(item, group: group, tag: tag)
@@ -1184,105 +999,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         return nodeMenu
     }
 
-    private func nodeMenuTitle(name: String, tag: String, delay: Int) -> NSAttributedString {
-        let cleanName = name.truncated(toVisualWidth: 20)
-        let isTesting = AsterState.shared.testingTags.contains(tag) || AsterState.shared.isTestingDelays
-        let delayText = nodeDelayText(delay: delay, tag: tag, isTesting: isTesting)
-        let textColor = nodeDelayColor(delay: delay, isTesting: isTesting)
+    @objc func onFlushDNS() {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/dscacheutil")
+        task.arguments = ["-flushcache"]
+        try? task.run()
+        task.waitUntilExit()
 
-        let paragraphStyle = NSMutableParagraphStyle()
-        paragraphStyle.tabStops = [
-            NSTextTab(textAlignment: .right, location: 260, options: [:])
-        ]
-
-        let fullText = "\(cleanName)\t\(delayText)"
-        let title = NSMutableAttributedString(string: fullText, attributes: [
-            .font: NSFont.menuFont(ofSize: 0),
-            .foregroundColor: NSColor.labelColor,
-            .paragraphStyle: paragraphStyle
-        ])
-
-        if let tabRange = fullText.range(of: "\t") {
-            let nsRange = NSRange(tabRange.upperBound..<fullText.endIndex, in: fullText)
-            title.addAttributes([
-                .font: NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium),
-                .foregroundColor: textColor,
-            ], range: nsRange)
-        }
-
-        return title
-    }
-
-    private func nodeDelayText(delay: Int, tag: String, isTesting: Bool) -> String {
-        LatencyFormatter.text(delayMs: delay, isTesting: isTesting)
-    }
-
-    // MARK: - 辅助方法：生成 12px 极细微圆角图标 (macOS 现代设计规范)
-    private func makeRoundedIcon(_ image: NSImage, size: CGFloat = 12, cornerRadius: CGFloat = 2.5) -> NSImage {
-        let newImg = NSImage(size: NSSize(width: size, height: size))
-        newImg.lockFocus()
-        let rect = NSRect(x: 0, y: 0, width: size, height: size)
-        let path = NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
-        path.addClip()
-        image.draw(in: rect, from: NSRect(origin: .zero, size: image.size), operation: .sourceOver, fraction: 1.0)
-        newImg.unlockFocus()
-        return newImg
-    }
-
-    // MARK: - 辅助方法：统一创建具备原生高清晰 SF Symbol 图标的菜单项
-    private func createMenuItem(
-        title: String,
-        icon: String,
-        action: Selector?,
-        key: String = "",
-        modifier: NSEvent.ModifierFlags = []
-    ) -> NSMenuItem {
-        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
-        if !modifier.isEmpty {
-            item.keyEquivalentModifierMask = modifier
-        }
-        if let img = NSImage(systemSymbolName: icon, accessibilityDescription: title) {
-            img.isTemplate = true
-            item.image = img
-        }
-        item.target = self
-        return item
-    }
-
-    private func makeStickyItem(
-        title: String,
-        icon: String? = nil,
-        image: NSImage? = nil,
-        accessory: String = "",
-        checked: Bool = false,
-        enabled: Bool = true,
-        toolTip: String? = nil,
-        kind: StickyMenuItemView.Kind = .action,
-        handler: @escaping () -> Void
-    ) -> NSMenuItem {
-        let item = NSMenuItem()
-        let resolvedImage: NSImage? = image ?? icon.flatMap {
-            let img = NSImage(systemSymbolName: $0, accessibilityDescription: title)
-            img?.isTemplate = true
-            return img
-        }
-        let view = StickyMenuItemView(
-            title: title,
-            accessory: accessory,
-            icon: resolvedImage,
-            checked: checked,
-            enabled: enabled,
-            kind: kind,
-            onClick: handler
-        )
-        if let toolTip {
-            view.toolTip = toolTip
-        }
-        item.view = view
-        item.isEnabled = enabled
-        item.state = checked ? .on : .off
-        item.toolTip = toolTip
-        return item
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .default)
     }
 
     // MARK: - 菜单点击事件响应
@@ -1441,75 +1165,90 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
     }
 }
 
-// MARK: - 状态栏菜单项自定义视图：点击不关闭菜单
+// MARK: - Aster 统一延迟指示实心圆角徽章 (Latency Pill)
+@MainActor
+public final class LatencyPillView: NSView {
+    private let label = NSTextField(labelWithString: "")
+    private var currentText: String = ""
+    private var pillColor: NSColor = .clear
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setupUI()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupUI()
+    }
+
+    private func setupUI() {
+        wantsLayer = true
+        layer?.cornerRadius = 3.5
+        layer?.masksToBounds = true
+
+        label.font = NSFont.monospacedDigitSystemFont(ofSize: 10.0, weight: .semibold)
+        label.textColor = .white
+        label.alignment = .center
+        label.isEditable = false
+        label.isBordered = false
+        label.drawsBackground = false
+        label.lineBreakMode = .byClipping
+        addSubview(label)
+    }
+
+    public override func layout() {
+        super.layout()
+        label.frame = bounds
+    }
+
+    public override func draw(_ dirtyRect: NSRect) {
+        guard !currentText.isEmpty, pillColor != .clear else { return }
+        pillColor.setFill()
+        let path = NSBezierPath(roundedRect: bounds, xRadius: 3.5, yRadius: 3.5)
+        path.fill()
+        super.draw(dirtyRect)
+    }
+
+    public func configure(delay: Int, isTesting: Bool) {
+        currentText = LatencyFormatter.badgeText(delayMs: delay, isTesting: isTesting)
+        pillColor = LatencyFormatter.nsColor(delayMs: delay, isTesting: isTesting)
+        isHidden = false
+        label.stringValue = currentText
+        needsDisplay = true
+    }
+}
+
+// MARK: - 策略组成员自定义菜单项视图 (对标 Surge 二级子菜单)
 @MainActor
 final class StickyMenuItemView: NSView {
     enum Kind {
-        case action
-        case mode(String)
-        case capture(systemProxy: Bool)
         case node(group: String, tag: String)
-        case config(String)
+        case custom
     }
 
     let kind: Kind
     private var onClick: () -> Void
-    private var titleText: String
-    private var accessoryText: String
-    private var accessoryColor: NSColor
-    private var accessoryAttributedString: NSAttributedString?
-    private var checked: Bool
-    private var itemEnabled: Bool
-    private var isHighlighted = false
+    private var titleText: String = ""
+    private var checked: Bool = false
+    private var itemEnabled: Bool = true
+    private var isHighlighted: Bool = false
     private var trackingArea: NSTrackingArea?
 
     private let checkView = NSImageView()
-    private let iconView = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
-    private let accessoryLabel = NSTextField(labelWithString: "")
-
-    private var isSubmenuItem: Bool {
-        switch kind {
-        case .node, .mode, .config:
-            return true
-        case .action, .capture:
-            return false
-        }
-    }
+    private let pillView = LatencyPillView(frame: NSRect(x: 0, y: 0, width: 52, height: 18))
 
     init(
-        title: String,
-        accessory: String = "",
-        accessoryColor: NSColor = .secondaryLabelColor,
-        accessoryAttributedString: NSAttributedString? = nil,
-        icon: NSImage? = nil,
-        checked: Bool = false,
-        enabled: Bool = true,
-        kind: Kind = .action,
+        kind: Kind,
         onClick: @escaping () -> Void
     ) {
         self.kind = kind
         self.onClick = onClick
-        self.titleText = title
-        self.accessoryText = accessory
-        self.accessoryColor = accessoryColor
-        self.accessoryAttributedString = accessoryAttributedString
-        self.checked = checked
-        self.itemEnabled = enabled
-        super.init(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+        super.init(frame: NSRect(x: 0, y: 0, width: 280, height: 26))
         autoresizingMask = [.width]
         wantsLayer = true
-        iconView.image = icon
-        iconView.imageScaling = .scaleProportionallyUpOrDown
         setupUI()
-        apply(
-            title: title,
-            accessory: accessory,
-            accessoryColor: accessoryColor,
-            accessoryAttributedString: accessoryAttributedString,
-            checked: checked,
-            enabled: enabled
-        )
     }
 
     required init?(coder: NSCoder) {
@@ -1518,21 +1257,17 @@ final class StickyMenuItemView: NSView {
 
     private func setupUI() {
         checkView.imageScaling = .scaleProportionallyUpOrDown
+        checkView.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)
         addSubview(checkView)
-        iconView.imageScaling = .scaleProportionallyUpOrDown
-        addSubview(iconView)
+
         titleLabel.font = NSFont.menuFont(ofSize: 0)
         titleLabel.isEditable = false
         titleLabel.isBordered = false
         titleLabel.drawsBackground = false
         titleLabel.lineBreakMode = .byTruncatingTail
         addSubview(titleLabel)
-        accessoryLabel.font = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .medium)
-        accessoryLabel.alignment = .right
-        accessoryLabel.isEditable = false
-        accessoryLabel.isBordered = false
-        accessoryLabel.drawsBackground = false
-        addSubview(accessoryLabel)
+
+        addSubview(pillView)
     }
 
     override func layout() {
@@ -1542,86 +1277,20 @@ final class StickyMenuItemView: NSView {
         }
         let height = bounds.height
 
-        if isSubmenuItem {
-            // 二级子菜单节点项（带左侧勾选列）
-            checkView.isHidden = !checked
-            checkView.frame = NSRect(x: 8, y: (height - 12) / 2, width: 12, height: 12)
+        // 左侧勾选列：x: 8, 宽高 12x12
+        checkView.isHidden = !checked
+        checkView.frame = NSRect(x: 8, y: (height - 12) / 2, width: 12, height: 12)
 
-            let hasIcon = iconView.image != nil
-            if hasIcon {
-                iconView.isHidden = false
-                iconView.frame = NSRect(x: 24, y: (height - 14) / 2, width: 14, height: 14)
-            } else {
-                iconView.isHidden = true
-                iconView.frame = .zero
-            }
+        // 右侧延迟胶囊：固定 52pt 宽度，右边距 10pt
+        let pillW: CGFloat = 52
+        let pillH: CGFloat = 18
+        let pillX = bounds.width - pillW - 10
+        pillView.frame = NSRect(x: pillX, y: (height - pillH) / 2, width: pillW, height: pillH)
 
-            let titleX: CGFloat = hasIcon ? 44 : 26
-
-            if !accessoryText.isEmpty {
-                accessoryLabel.isHidden = false
-                accessoryLabel.frame = NSRect(x: bounds.width - 74, y: 3, width: 64, height: 18)
-                titleLabel.frame = NSRect(
-                    x: titleX,
-                    y: 3,
-                    width: max(bounds.width - titleX - 74 - 4, 40),
-                    height: 18
-                )
-            } else {
-                accessoryLabel.isHidden = true
-                accessoryLabel.frame = .zero
-                titleLabel.frame = NSRect(
-                    x: titleX,
-                    y: 3,
-                    width: max(bounds.width - titleX - 14, 40),
-                    height: 18
-                )
-            }
-        } else {
-            // 主菜单项（无左侧勾选列）
-            // checkView: 隐藏或作为右侧指示器
-            if checked {
-                checkView.isHidden = false
-                checkView.frame = NSRect(x: bounds.width - 24, y: (height - 12) / 2, width: 12, height: 12)
-            } else {
-                checkView.isHidden = true
-                checkView.frame = .zero
-            }
-
-            // iconView: 居中于 NSRect(x: 13, y: (height - 16) / 2, width: 16, height: 16)，完美对齐原生 NSMenuItem.image（x=13~14）
-            if iconView.image != nil {
-                iconView.isHidden = false
-                iconView.frame = NSRect(x: 13, y: (height - 16) / 2, width: 16, height: 16)
-            } else {
-                iconView.isHidden = true
-                iconView.frame = .zero
-            }
-
-            // titleLabel: 严格起始于 x: 35，完全对齐原生 NSMenuItem.title（x=34~35）
-            let titleX: CGFloat = 35
-
-            if !accessoryText.isEmpty {
-                accessoryLabel.isHidden = false
-                let accWidth: CGFloat = 72
-                accessoryLabel.frame = NSRect(x: bounds.width - accWidth - 10, y: 3, width: accWidth, height: 18)
-                titleLabel.frame = NSRect(
-                    x: titleX,
-                    y: 3,
-                    width: max(bounds.width - titleX - accWidth - 14, 40),
-                    height: 18
-                )
-            } else {
-                accessoryLabel.isHidden = true
-                accessoryLabel.frame = .zero
-                let trailingReserved: CGFloat = checked ? 28 : 14
-                titleLabel.frame = NSRect(
-                    x: titleX,
-                    y: 3,
-                    width: max(bounds.width - titleX - trailingReserved, 40),
-                    height: 18
-                )
-            }
-        }
+        // 节点名称文字：严格从 x: 26 起始（勾选列右侧对齐），右侧避让胶囊徽章
+        let titleX: CGFloat = 26
+        let titleW = pillView.isHidden ? max(bounds.width - titleX - 14, 40) : max(pillX - titleX - 8, 40)
+        titleLabel.frame = NSRect(x: titleX, y: (height - 18) / 2, width: titleW, height: 18)
     }
 
     override func viewDidMoveToSuperview() {
@@ -1653,65 +1322,68 @@ final class StickyMenuItemView: NSView {
     }
 
     func apply(
-        title: String? = nil,
-        accessory: String? = nil,
-        accessoryColor: NSColor? = nil,
-        accessoryAttributedString: NSAttributedString? = nil,
-        icon: NSImage? = nil,
-        checked: Bool? = nil,
-        enabled: Bool? = nil,
-        toolTip: String? = nil
+        title: String,
+        checked: Bool,
+        enabled: Bool,
+        delay: Int,
+        isTesting: Bool,
+        isSpecialOutbound: Bool,
+        toolTip: String?
     ) {
-        if let title { titleText = title }
-        if let accessory {
-            accessoryText = accessory
-            if accessoryAttributedString == nil {
-                self.accessoryAttributedString = nil
-            }
-        }
-        if let accessoryColor { self.accessoryColor = accessoryColor }
-        if let accessoryAttributedString {
-            self.accessoryAttributedString = accessoryAttributedString
-            self.accessoryText = accessoryAttributedString.string
-        }
-        if let icon { iconView.image = icon }
-        if let checked { self.checked = checked }
-        if let enabled { itemEnabled = enabled }
+        self.titleText = title
+        self.checked = checked
+        self.itemEnabled = enabled
+
+        titleLabel.stringValue = title
         if let toolTip { self.toolTip = toolTip }
 
-        titleLabel.stringValue = titleText
-
-        if let attrStr = self.accessoryAttributedString {
-            if isHighlighted {
-                let m = NSMutableAttributedString(attributedString: attrStr)
-                m.addAttribute(.foregroundColor, value: NSColor.selectedMenuItemTextColor, range: NSRange(location: 0, length: m.length))
-                accessoryLabel.attributedStringValue = m
-            } else {
-                accessoryLabel.attributedStringValue = attrStr
-            }
+        if isSpecialOutbound {
+            pillView.isHidden = true
         } else {
-            accessoryLabel.stringValue = accessoryText
-            accessoryLabel.textColor = isHighlighted ? .selectedMenuItemTextColor : self.accessoryColor
+            pillView.isHidden = false
+            pillView.configure(delay: delay, isTesting: isTesting)
         }
 
-        checkView.image = self.checked ? NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil) : nil
-        checkView.contentTintColor = isHighlighted ? .selectedMenuItemTextColor : .labelColor
-        iconView.contentTintColor = isHighlighted ? .selectedMenuItemTextColor : .labelColor
-        titleLabel.textColor = isHighlighted ? .selectedMenuItemTextColor : .labelColor
+        updateHighlightColors()
         alphaValue = itemEnabled ? 1 : 0.4
         needsLayout = true
         needsDisplay = true
     }
 
+    func apply(
+        checked: Bool? = nil,
+        enabled: Bool? = nil,
+        toolTip: String? = nil
+    ) {
+        if let checked {
+            self.checked = checked
+            checkView.isHidden = !checked
+        }
+        if let enabled { self.itemEnabled = enabled }
+        if let toolTip { self.toolTip = toolTip }
+        updateHighlightColors()
+        alphaValue = itemEnabled ? 1 : 0.4
+        needsLayout = true
+        needsDisplay = true
+    }
+
+    private func updateHighlightColors() {
+        let textTint: NSColor = isHighlighted ? .selectedMenuItemTextColor : .labelColor
+        titleLabel.textColor = textTint
+        checkView.contentTintColor = textTint
+    }
+
     override func mouseEntered(with event: NSEvent) {
         guard itemEnabled else { return }
         isHighlighted = true
-        apply()
+        updateHighlightColors()
+        needsDisplay = true
     }
 
     override func mouseExited(with event: NSEvent) {
         isHighlighted = false
-        apply()
+        updateHighlightColors()
+        needsDisplay = true
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -1727,7 +1399,6 @@ final class StrategySpeedHeaderView: NSView {
     private let group: StrategyGroup
     private let onClick: () -> Void
     private let titleLabel = NSTextField(labelWithString: "延迟测试")
-    private let iconView = NSImageView()
     private let spinner = NSProgressIndicator()
     private var isHighlighted: Bool = false
     private var isTesting: Bool = false
@@ -1750,22 +1421,17 @@ final class StrategySpeedHeaderView: NSView {
         wantsLayer = true
         layer?.cornerRadius = 4.5
 
-        iconView.image = NSImage(systemSymbolName: "bolt.fill", accessibilityDescription: "延迟测试")
-        iconView.contentTintColor = .labelColor
-        iconView.frame = NSRect(x: 8, y: 6, width: 14, height: 14)
-        addSubview(iconView)
+        titleLabel.font = NSFont.menuFont(ofSize: 0)
+        titleLabel.textColor = .labelColor
+        titleLabel.isEditable = false
+        titleLabel.isBordered = false
+        titleLabel.drawsBackground = false
+        addSubview(titleLabel)
 
         spinner.style = .spinning
         spinner.controlSize = .small
-        spinner.frame = NSRect(x: 8, y: 6, width: 14, height: 14)
         spinner.isHidden = true
         addSubview(spinner)
-
-        titleLabel.font = NSFont.menuFont(ofSize: 0)
-        titleLabel.textColor = .labelColor
-        titleLabel.frame = NSRect(x: 28, y: 4, width: max(bounds.width - 38, 180), height: 18)
-        titleLabel.autoresizingMask = [.width]
-        addSubview(titleLabel)
 
         update(isTesting: isTesting)
     }
@@ -1792,10 +1458,9 @@ final class StrategySpeedHeaderView: NSView {
             frame.size.width = sv.bounds.width
         }
         let height = bounds.height
-        let iconY = (height - 14) / 2
-        iconView.frame = NSRect(x: 8, y: iconY, width: 14, height: 14)
-        spinner.frame = NSRect(x: 8, y: iconY, width: 14, height: 14)
-        titleLabel.frame = NSRect(x: 28, y: (height - 18) / 2, width: max(bounds.width - 36, 180), height: 18)
+        titleLabel.frame = NSRect(x: 26, y: (height - 18) / 2, width: 120, height: 18)
+        let spinnerSize: CGFloat = 14
+        spinner.frame = NSRect(x: bounds.width - spinnerSize - 14, y: (height - spinnerSize) / 2, width: spinnerSize, height: spinnerSize)
     }
 
     override func updateTrackingAreas() {
@@ -1816,7 +1481,7 @@ final class StrategySpeedHeaderView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         if isHighlighted {
-            NSColor.quaternaryLabelColor.withAlphaComponent(0.2).setFill()
+            NSColor.selectedContentBackgroundColor.withAlphaComponent(0.15).setFill()
             let path = NSBezierPath(roundedRect: bounds.insetBy(dx: 4, dy: 1), xRadius: 4.5, yRadius: 4.5)
             path.fill()
         }
@@ -1826,15 +1491,12 @@ final class StrategySpeedHeaderView: NSView {
         self.isTesting = isTesting
         titleLabel.stringValue = isTesting ? "正在测速…" : "延迟测试"
         if isTesting {
-            iconView.isHidden = true
             spinner.isHidden = false
             spinner.startAnimation(nil)
-            titleLabel.textColor = .systemBlue
+            titleLabel.textColor = .controlAccentColor
         } else {
             spinner.stopAnimation(nil)
             spinner.isHidden = true
-            iconView.isHidden = false
-            iconView.contentTintColor = .labelColor
             titleLabel.textColor = .labelColor
         }
         needsDisplay = true
