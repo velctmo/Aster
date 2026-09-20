@@ -409,6 +409,14 @@ func FindBinary(configured string) (string, error) {
 			return p, nil
 		}
 	}
+	// 检查系统级管理目录（由 PKG 安装器部署）
+	if p := latestManaged("/Library/Application Support/Aster/cores"); p != "" {
+		return p, nil
+	}
+	sysCore := "/Library/Application Support/Aster/cores/sing-box"
+	if st, err := os.Stat(sysCore); err == nil && !st.IsDir() && isArm64Binary(sysCore) {
+		return sysCore, nil
+	}
 	// 检查工程源码/测试环境中的 vendor/cores 目录
 	if p := latestManaged("vendor/cores"); p != "" {
 		return p, nil
@@ -501,6 +509,9 @@ func latestManaged(coresDir string) string {
 			continue
 		}
 		p := filepath.Join(coresDir, name)
+		if abs, err := filepath.Abs(p); err == nil {
+			p = abs
+		}
 		if info.Mode()&0o111 == 0 {
 			continue
 		}

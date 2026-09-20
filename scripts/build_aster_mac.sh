@@ -62,7 +62,16 @@ echo "  [2/5] 编译 Aster SwiftUI 客户端..."
 # fallback produces a misleading wall of macro errors instead of an app.
 if ! command -v xcodebuild >/dev/null 2>&1 || ! xcodebuild -version >/dev/null 2>&1; then
   if [[ -f "bin/Aster" && -x "bin/Aster" ]]; then
-    echo "  ⚠️ 未找到完整 Xcode (xcodebuild)，检测到 bin/Aster 存在，复用现有二进制打包..."
+    local_bin_time="$(stat -f "%Sm" -t "%Y-%m-%d %H:%M:%S" bin/Aster 2>/dev/null || echo "未知")"
+    echo "  ⚠️  ================================================================"
+    echo "  ⚠️  【警告】本机未找到完整 Xcode (xcodebuild)，仅有 Command Line Tools！"
+    echo "  ⚠️  SwiftUI 宏 (@State 等) 必须由 Xcode 编译，裸 CLT 无法编译 Swift 客户端。"
+    echo "  ⚠️  正在复用现有历史二进制: bin/Aster (最后修改时间: $local_bin_time)"
+    echo "  ⚠️  【注意】macos-native/Sources/ 下的任何 Swift 代码改动均未生效！"
+    echo "  ⚠️  如需本地编译最新客户端，请安装 Xcode 16 并执行:"
+    echo "  ⚠️    sudo xcode-select -s /Applications/Xcode.app/Contents/Developer"
+    echo "  ⚠️  或将代码推送到 GitHub，由具备 Xcode 16 的 GitHub CI 自动编译并下载！"
+    echo "  ⚠️  ================================================================"
   else
     echo "错误: 构建 Aster.app 需要完整 Xcode 15+（当前仅安装 Command Line Tools）。" >&2
     echo "请安装 Xcode 后执行: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer" >&2
