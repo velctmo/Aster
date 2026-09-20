@@ -17,6 +17,8 @@ const (
 	DefaultMixedPort  = 6780
 	DefaultClashPort  = 9090
 	ControlSocketName = "daemon.sock"
+	DefaultDelayURL    = "https://www.gstatic.com/generate_204"
+	DefaultProfileName = "Default"
 )
 
 type Capture struct {
@@ -285,7 +287,7 @@ func DefaultFile() File {
 			DirectCN:         true,
 			DNSMode:          "fake-ip",
 			ProxyBypass:      []string{"127.0.0.1", "localhost", "*.local", "*.lan", "10.*", "172.16.*", "172.17.*", "172.18.*", "172.19.*", "172.20.*", "172.21.*", "172.22.*", "172.23.*", "172.24.*", "172.25.*", "172.26.*", "172.27.*", "172.28.*", "172.29.*", "172.30.*", "172.31.*", "192.168.*"},
-			DelayURL:         "https://www.gstatic.com/generate_204",
+			DelayURL:         DefaultDelayURL,
 			DelayTimeoutMs:   2500,
 			DelayConcurrency: 8,
 			StrictRoute:      false,
@@ -302,7 +304,7 @@ func DefaultFile() File {
 		ClashSecret: hex.EncodeToString(secret),
 		APIToken:    hex.EncodeToString(token),
 	}
-	f.Profiles = []ConfigProfile{{ID: NewID(), Name: "节点池", Kind: ProfileKindNodes, UpdatedAt: time.Now().Unix(), Revision: 1}}
+	f.Profiles = []ConfigProfile{{ID: NewID(), Name: DefaultProfileName, Kind: ProfileKindNodes, UpdatedAt: time.Now().Unix(), Revision: 1}}
 	f.ActiveConfigID = f.Profiles[0].ID
 	f.Runtime.LastSuccessfulConfigID = f.ActiveConfigID
 	return f
@@ -366,6 +368,9 @@ func mergeDefaults(f File) File {
 	for i := range f.Profiles {
 		if f.Profiles[i].Revision == 0 {
 			f.Profiles[i].Revision = 1
+		}
+		if f.Profiles[i].Name == "节点池" {
+			f.Profiles[i].Name = DefaultProfileName
 		}
 		if f.Profiles[i].Script != "" && f.Profiles[i].ScriptID == "" {
 			scriptID := NewID()
@@ -603,5 +608,17 @@ func RetentionDuration(s string) time.Duration {
 		return 24 * time.Hour
 	default:
 		return 15 * time.Minute
+	}
+}
+
+// ClashMode converts internal mode ("rule", "global", "direct") to Clash API mode ("Rule", "Global", "Direct").
+func ClashMode(mode string) string {
+	switch strings.ToLower(mode) {
+	case "global":
+		return "Global"
+	case "direct":
+		return "Direct"
+	default:
+		return "Rule"
 	}
 }

@@ -15,7 +15,7 @@ public enum AsterMetrics {
     // 连续曲率圆角 (Continuous Curves)
     public static let radiusBadge: CGFloat = 4.5
     public static let radiusControl: CGFloat = 6.0
-    public static let radiusCard: CGFloat = 10.0
+    public static let radiusCard: CGFloat = 12.0
     public static let radiusSheet: CGFloat = 12.0
 
     // 状态栏菜单对齐槽位
@@ -28,7 +28,7 @@ public enum AsterMetrics {
 public enum DesignTokens {
     public static let pagePadding: CGFloat = 24
     public static let sectionGap: CGFloat = 20
-    public static let cardRadius: CGFloat = 10
+    public static let cardRadius: CGFloat = 12
     public static let cardGap: CGFloat = 14
     public static let toolbarHeight: CGFloat = 64
     public static let sidebarExpanded: CGFloat = 208
@@ -213,6 +213,181 @@ public struct AppIconView: View {
     }
 }
 
+extension AppMode {
+    public var color: Color {
+        switch self {
+        case .rule: return Color(red: 0.22, green: 0.72, blue: 0.48)
+        case .global: return .blue
+        case .direct: return Color(red: 0.88, green: 0.62, blue: 0.22)
+        }
+    }
+}
+
+// MARK: - 统一延迟格式化与高敏色阶系统 (LatencyFormatter)
+public enum LatencyFormatter {
+    public static func text(delayMs: Int, isTesting: Bool = false) -> String {
+        if isTesting { return "测速中…" }
+        if delayMs < 0 { return "超时" }
+        if delayMs == 0 { return "---" }
+        return "\(delayMs) ms"
+    }
+
+    public static func badgeText(delayMs: Int, isTesting: Bool = false) -> String {
+        if isTesting { return "测速中" }
+        if delayMs < 0 { return "超时" }
+        if delayMs == 0 { return "---" }
+        return "\(delayMs) ms"
+    }
+
+    public static func shortText(delayMs: Int, isTesting: Bool = false) -> String {
+        if isTesting { return "测速中" }
+        if delayMs < 0 { return "超时" }
+        if delayMs == 0 { return "--" }
+        return "\(delayMs)"
+    }
+
+    public static func color(delayMs: Int, isTesting: Bool = false) -> Color {
+        switch LatencyGrade.grade(delayMs: delayMs, isTesting: isTesting) {
+        case .testing:
+            return .blue
+        case .timeout:
+            return Color(red: 0.85, green: 0.38, blue: 0.38)
+        case .untested:
+            return .secondary
+        case .fast:
+            return Color(red: 0.22, green: 0.72, blue: 0.48)
+        case .medium:
+            return Color(red: 0.88, green: 0.62, blue: 0.22)
+        case .slow:
+            return Color(red: 0.85, green: 0.38, blue: 0.38)
+        }
+    }
+
+    public static func nsColor(delayMs: Int, isTesting: Bool = false) -> NSColor {
+        switch LatencyGrade.grade(delayMs: delayMs, isTesting: isTesting) {
+        case .testing:
+            return .systemBlue
+        case .timeout:
+            return NSColor(srgbRed: 0.85, green: 0.38, blue: 0.38, alpha: 1.0)
+        case .untested:
+            return .secondaryLabelColor
+        case .fast:
+            return NSColor(srgbRed: 0.22, green: 0.72, blue: 0.48, alpha: 1.0)
+        case .medium:
+            return NSColor(srgbRed: 0.88, green: 0.62, blue: 0.22, alpha: 1.0)
+        case .slow:
+            return NSColor(srgbRed: 0.85, green: 0.38, blue: 0.38, alpha: 1.0)
+        }
+    }
+}
+
+// MARK: - 系统剪贴板通用工具 (带触觉反馈)
+public enum ClipboardHelper {
+    public static func copy(_ text: String) {
+        guard !text.isEmpty else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .default)
+    }
+}
+
+// MARK: - 工业级搜索框输入组件 (ExquisiteSearchField)
+public struct ExquisiteSearchField: View {
+    public var placeholder: String
+    @Binding public var text: String
+    public var maxWidth: CGFloat? = nil
+
+    public init(placeholder: String = "搜索…", text: Binding<String>, maxWidth: CGFloat? = nil) {
+        self.placeholder = placeholder
+        self._text = text
+        self.maxWidth = maxWidth
+    }
+
+    public var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.secondary)
+
+            TextField(placeholder, text: $text)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("清空搜索内容")
+            }
+        }
+        .padding(.horizontal, 8)
+        .frame(height: 28)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.6))
+        .clipShape(RoundedRectangle(cornerRadius: AsterMetrics.radiusControl, style: .continuous))
+        .nativeHairlineBorder(cornerRadius: AsterMetrics.radiusControl, lineWidth: 0.6)
+        .frame(maxWidth: maxWidth)
+    }
+}
+
+// MARK: - 全局出站分流模式控制器组件 (ModeSegmentedControl)
+public struct ModeSegmentedControl: View {
+    @Binding public var selectedMode: String
+    public var onSelect: ((AppMode) -> Void)? = nil
+
+    public init(selectedMode: Binding<String>, onSelect: ((AppMode) -> Void)? = nil) {
+        self._selectedMode = selectedMode
+        self.onSelect = onSelect
+    }
+
+    public var body: some View {
+        HStack(spacing: 3) {
+            ForEach(AppMode.allCases) { mode in
+                let isSelected = selectedMode == mode.rawValue
+                Button {
+                    selectedMode = mode.rawValue
+                    onSelect?(mode)
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: mode.icon)
+                            .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                        Text(mode.title)
+                            .font(.system(size: 11.5, weight: isSelected ? .semibold : .regular))
+                        Text(mode.code)
+                            .font(.system(size: 9, weight: .bold, design: .monospaced))
+                            .foregroundStyle(isSelected ? mode.color : Color.secondary.opacity(0.7))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4.5)
+                    .background(
+                        isSelected ?
+                            RoundedRectangle(cornerRadius: AsterMetrics.radiusControl, style: .continuous)
+                                .fill(Color(NSColor.controlBackgroundColor))
+                                .shadow(color: Color.black.opacity(0.06), radius: 2, x: 0, y: 1)
+                            : nil
+                    )
+                    .overlay(
+                        isSelected ?
+                            RoundedRectangle(cornerRadius: AsterMetrics.radiusControl, style: .continuous)
+                                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.6)
+                            : nil
+                    )
+                    .foregroundStyle(isSelected ? Color.primary : Color.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(3)
+        .background(Color.primary.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: AsterMetrics.radiusControl + 2, style: .continuous))
+        .nativeHairlineBorder(cornerRadius: AsterMetrics.radiusControl + 2, lineWidth: 0.6)
+    }
+}
+
 // MARK: - 节点延迟气泡组件 (高敏彩色分级)
 public struct LatencyBadge: View {
     public var delayMs: Int
@@ -228,16 +403,15 @@ public struct LatencyBadge: View {
             if isTesting {
                 ProgressView()
                     .controlSize(.mini)
-                    .scaleEffect(0.65)
-                    .frame(width: 12, height: 12)
-                Text("测速中")
+                    .frame(width: 10, height: 10)
+                Text(LatencyFormatter.badgeText(delayMs: delayMs, isTesting: true))
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.blue)
             } else {
                 Circle()
                     .fill(badgeColor)
                     .frame(width: 5.5, height: 5.5)
-                Text(delayText)
+                Text(LatencyFormatter.badgeText(delayMs: delayMs, isTesting: false))
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundStyle(badgeColor)
             }
@@ -253,28 +427,7 @@ public struct LatencyBadge: View {
     }
 
     private var badgeColor: Color {
-        if isTesting {
-            return .blue
-        } else if delayMs < 0 {
-            return Color(red: 0.85, green: 0.38, blue: 0.38)
-        } else if delayMs == 0 {
-            return .secondary
-        } else if delayMs <= 150 {
-            return Color(red: 0.22, green: 0.72, blue: 0.48)
-        } else if delayMs <= 500 {
-            return Color(red: 0.88, green: 0.62, blue: 0.22)
-        } else {
-            return Color(red: 0.85, green: 0.38, blue: 0.38)
-        }
-    }
-
-    private var delayText: String {
-        if delayMs < 0 {
-            return "超时"
-        } else if delayMs == 0 {
-            return "---"
-        }
-        return "\(delayMs)ms"
+        LatencyFormatter.color(delayMs: delayMs, isTesting: isTesting)
     }
 }
 
@@ -334,9 +487,9 @@ public enum StrategyPresentation {
             return "REJECT"
         case "auto":
             if let autoWinner, !autoWinner.isEmpty {
-                return "♻️ 自动优选 ➔ \(clean(autoWinner))"
+                return "自动优选 ➔ \(clean(autoWinner))"
             }
-            return "♻️ 自动优选"
+            return "自动优选"
         default:
             return clean(node?.name ?? tag)
         }
@@ -462,6 +615,124 @@ public struct LiquidGlassCard<Content: View>: View {
     }
 }
 
+// MARK: - 典雅曜石流光玻璃卡片容器 (ElevatedGlassCard)
+public struct ElevatedGlassCard<Content: View>: View {
+    public var cornerRadius: CGFloat
+    public var content: () -> Content
+    @Environment(\.colorScheme) private var colorScheme
+
+    public init(cornerRadius: CGFloat = AsterMetrics.radiusCard, @ViewBuilder content: @escaping () -> Content) {
+        self.cornerRadius = cornerRadius
+        self.content = content
+    }
+
+    public var body: some View {
+        content()
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(
+                        colorScheme == .dark
+                            ? Color.white.opacity(0.12)
+                            : Color.black.opacity(0.07),
+                        lineWidth: 0.6
+                    )
+            )
+            .shadow(
+                color: colorScheme == .dark
+                    ? Color.black.opacity(0.28)
+                    : Color.black.opacity(0.04),
+                radius: 8,
+                x: 0,
+                y: 2
+            )
+    }
+}
+
+public struct ElevatedGlassCardModifier: ViewModifier {
+    public var cornerRadius: CGFloat
+    @Environment(\.colorScheme) private var colorScheme
+
+    public init(cornerRadius: CGFloat = AsterMetrics.radiusCard) {
+        self.cornerRadius = cornerRadius
+    }
+
+    public func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(
+                        colorScheme == .dark
+                            ? Color.white.opacity(0.12)
+                            : Color.black.opacity(0.07),
+                        lineWidth: 0.6
+                    )
+            )
+            .shadow(
+                color: colorScheme == .dark
+                    ? Color.black.opacity(0.28)
+                    : Color.black.opacity(0.04),
+                radius: 8,
+                x: 0,
+                y: 2
+            )
+    }
+}
+
+public extension View {
+    func elevatedGlassCard(cornerRadius: CGFloat = AsterMetrics.radiusCard) -> some View {
+        self.modifier(ElevatedGlassCardModifier(cornerRadius: cornerRadius))
+    }
+}
+
+// MARK: - 实时运行状态信标指示点 (带呼吸微光脉冲)
+public struct StatusBeaconDot: View {
+    public var active: Bool
+    public var color: Color
+    public var size: CGFloat
+    @State private var isPulsing: Bool = false
+
+    public init(active: Bool, color: Color = Color(red: 0.20, green: 0.78, blue: 0.45), size: CGFloat = 8) {
+        self.active = active
+        self.color = color
+        self.size = size
+    }
+
+    public var body: some View {
+        ZStack {
+            if active {
+                Circle()
+                    .fill(color.opacity(isPulsing ? 0.15 : 0.38))
+                    .frame(width: size * 2.2, height: size * 2.2)
+                    .scaleEffect(isPulsing ? 1.25 : 0.85)
+                    .animation(
+                        Animation.easeInOut(duration: 1.8)
+                            .repeatForever(autoreverses: true),
+                        value: isPulsing
+                    )
+            }
+            Circle()
+                .fill(active ? color : Color.secondary.opacity(0.4))
+                .frame(width: size, height: size)
+                .shadow(color: active ? color.opacity(0.5) : Color.clear, radius: 2)
+        }
+        .frame(width: size * 2.2, height: size * 2.2)
+        .onAppear {
+            if active { isPulsing = true }
+        }
+        .onChange(of: active) { _, newValue in
+            isPulsing = newValue
+        }
+    }
+}
+
 // MARK: - 字符串视觉列宽智能截断 (CJK/全角占 2 列，Emoji/国旗占 2 列，ASCII/半角占 1 列)
 extension String {
     public func truncated(toVisualWidth maxCols: Int) -> String {
@@ -527,9 +798,9 @@ public struct ActionBadge: View {
         case "reject":
             return (Color(red: 0.85, green: 0.38, blue: 0.38), "REJECT")
         case "proxy":
-            return (Color.secondary.opacity(0.7), "PROXY")
+            return (Color(red: 0.25, green: 0.55, blue: 0.95), "PROXY")
         default:
-            return (nil, trimmed.isEmpty ? "DIRECT" : trimmed)
+            return (Color.accentColor.opacity(0.85), trimmed.isEmpty ? "DIRECT" : trimmed)
         }
     }
 
@@ -651,6 +922,58 @@ public struct ExquisiteSecondaryButtonStyle: ButtonStyle {
     }
 }
 
+public struct ExquisiteDestructiveButtonStyle: ButtonStyle {
+    public var height: CGFloat
+    public var cornerRadius: CGFloat
+
+    public init(height: CGFloat = 26, cornerRadius: CGFloat = AsterMetrics.radiusControl) {
+        self.height = height
+        self.cornerRadius = cornerRadius
+    }
+
+    public func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .medium))
+            .foregroundColor(Color(red: 0.90, green: 0.35, blue: 0.35))
+            .padding(.horizontal, 12)
+            .frame(height: height)
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(Color(red: 0.90, green: 0.35, blue: 0.35).opacity(configuration.isPressed ? 0.16 : 0.08))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(Color(red: 0.90, green: 0.35, blue: 0.35).opacity(0.25), lineWidth: 0.5)
+            )
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
+public struct ExquisitePillButtonStyle: ButtonStyle {
+    public var height: CGFloat
+
+    public init(height: CGFloat = 22) {
+        self.height = height
+    }
+
+    public func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 10.5, weight: .medium))
+            .foregroundColor(.primary.opacity(0.85))
+            .padding(.horizontal, 8)
+            .frame(height: height)
+            .background(
+                Capsule()
+                    .fill(Color.primary.opacity(configuration.isPressed ? 0.10 : 0.05))
+            )
+            .overlay(
+                Capsule()
+                    .strokeBorder(Color.primary.opacity(0.12), lineWidth: 0.5)
+            )
+            .animation(.easeOut(duration: 0.12), value: configuration.isPressed)
+    }
+}
+
 extension ButtonStyle where Self == ExquisitePrimaryButtonStyle {
     public static var exquisitePrimary: ExquisitePrimaryButtonStyle { ExquisitePrimaryButtonStyle() }
     public static func exquisitePrimary(height: CGFloat = 26, cornerRadius: CGFloat = AsterMetrics.radiusControl) -> ExquisitePrimaryButtonStyle {
@@ -662,6 +985,20 @@ extension ButtonStyle where Self == ExquisiteSecondaryButtonStyle {
     public static var exquisiteSecondary: ExquisiteSecondaryButtonStyle { ExquisiteSecondaryButtonStyle() }
     public static func exquisiteSecondary(height: CGFloat = 26, cornerRadius: CGFloat = AsterMetrics.radiusControl) -> ExquisiteSecondaryButtonStyle {
         ExquisiteSecondaryButtonStyle(height: height, cornerRadius: cornerRadius)
+    }
+}
+
+extension ButtonStyle where Self == ExquisiteDestructiveButtonStyle {
+    public static var exquisiteDestructive: ExquisiteDestructiveButtonStyle { ExquisiteDestructiveButtonStyle() }
+    public static func exquisiteDestructive(height: CGFloat = 26, cornerRadius: CGFloat = AsterMetrics.radiusControl) -> ExquisiteDestructiveButtonStyle {
+        ExquisiteDestructiveButtonStyle(height: height, cornerRadius: cornerRadius)
+    }
+}
+
+extension ButtonStyle where Self == ExquisitePillButtonStyle {
+    public static var exquisitePill: ExquisitePillButtonStyle { ExquisitePillButtonStyle() }
+    public static func exquisitePill(height: CGFloat = 22) -> ExquisitePillButtonStyle {
+        ExquisitePillButtonStyle(height: height)
     }
 }
 
@@ -899,28 +1236,32 @@ public struct ConnectionDiagnosticBadge: View {
         Group {
             if conn.diagnostics?.closeReason == "rejected" || conn.isReject {
                 badgeLayout(
-                    text: "⊘ 阻断",
+                    icon: "nosign",
+                    text: "阻断",
                     textColor: Color(red: 0.88, green: 0.35, blue: 0.35),
                     bgColor: Color(red: 0.88, green: 0.35, blue: 0.35).opacity(0.12),
                     borderColor: Color(red: 0.88, green: 0.35, blue: 0.35).opacity(0.30)
                 )
             } else if conn.diagnostics?.closeReason == "timeout" {
                 badgeLayout(
-                    text: "⏱ 超时",
+                    icon: "clock",
+                    text: "超时",
                     textColor: Color.orange,
                     bgColor: Color.orange.opacity(0.12),
                     borderColor: Color.orange.opacity(0.30)
                 )
             } else if conn.diagnostics?.closeReason == "dns_failed" {
                 badgeLayout(
-                    text: "⚠ DNS 异常",
+                    icon: "exclamationmark.triangle",
+                    text: "DNS 异常",
                     textColor: Color(red: 0.65, green: 0.40, blue: 0.85),
                     bgColor: Color(red: 0.65, green: 0.40, blue: 0.85).opacity(0.12),
                     borderColor: Color(red: 0.65, green: 0.40, blue: 0.85).opacity(0.30)
                 )
             } else if conn.isClosed == true || conn.diagnostics?.closeReason == "completed" {
                 badgeLayout(
-                    text: "✓ \(durationText)",
+                    icon: "checkmark",
+                    text: durationText,
                     textColor: Color.secondary,
                     bgColor: Color.secondary.opacity(0.10),
                     borderColor: Color.secondary.opacity(0.22)
@@ -931,18 +1272,24 @@ public struct ConnectionDiagnosticBadge: View {
         }
     }
 
-    private func badgeLayout(text: String, textColor: Color, bgColor: Color, borderColor: Color) -> some View {
-        Text(text)
-            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-            .foregroundStyle(textColor)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2.5)
-            .background(bgColor)
-            .clipShape(Capsule())
-            .overlay(
-                Capsule()
-                    .strokeBorder(borderColor, lineWidth: 0.5)
-            )
+    private func badgeLayout(icon: String? = nil, text: String, textColor: Color, bgColor: Color, borderColor: Color) -> some View {
+        HStack(spacing: 3.5) {
+            if let icon {
+                Image(systemName: icon)
+                    .font(.system(size: 8.5, weight: .bold))
+            }
+            Text(text)
+                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+        }
+        .foregroundStyle(textColor)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2.5)
+        .background(bgColor)
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .strokeBorder(borderColor, lineWidth: 0.5)
+        )
     }
 
     private var activeBadge: some View {
@@ -1069,9 +1416,10 @@ public struct ConnectionDetailDrawer: View {
                     isMonospaced: true,
                     copyable: true
                 )
+                let srcIP = conn.metadata?.sourceIP?.trimmingCharacters(in: .whitespaces) ?? ""
                 DrawerInfoRow(
                     label: "来源 IP",
-                    value: conn.metadata?.sourceIP ?? "127.0.0.1",
+                    value: srcIP.isEmpty ? "本机" : (srcIP == "127.0.0.1" ? "本机 (127.0.0.1)" : srcIP),
                     isMonospaced: true
                 )
             }
@@ -1127,9 +1475,7 @@ public struct ConnectionDetailDrawer: View {
             VStack(spacing: 8) {
                 Button {
                     let host = conn.metadata?.host ?? conn.effectiveTarget
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(host, forType: .string)
-                    AsterState.shared.notify(message: "已复制目标主机: \(host)", type: .success)
+                    ClipboardHelper.copy(host)
                 } label: {
                     HStack {
                         Image(systemName: "doc.on.doc")
@@ -1141,7 +1487,6 @@ public struct ConnectionDetailDrawer: View {
 
                 Button {
                     AsterState.shared.closeConnection(conn.id)
-                    AsterState.shared.notify(message: "已断开连接", type: .info)
                     onClose()
                 } label: {
                     HStack {
@@ -1187,17 +1532,17 @@ public struct ConnectionDetailDrawer: View {
     private var formatCloseReason: String {
         if let reason = conn.diagnostics?.closeReason {
             switch reason {
-            case "rejected": return "⊘ 规则阻断"
-            case "timeout": return "⏱ 连接超时"
-            case "dns_failed": return "⚠ DNS 异常"
-            case "completed": return "✓ 正常完成"
-            case "active": return "● 活跃传输中"
+            case "rejected": return "规则阻断"
+            case "timeout": return "连接超时"
+            case "dns_failed": return "DNS 异常"
+            case "completed": return "正常完成"
+            case "active": return "活跃传输中"
             default: return reason
             }
         }
-        if conn.isReject { return "⊘ 规则阻断" }
-        if conn.isClosed == true { return "✓ 已关闭" }
-        return "● 活跃传输中"
+        if conn.isReject { return "规则阻断" }
+        if conn.isClosed == true { return "已关闭" }
+        return "活跃传输中"
     }
 }
 
@@ -1270,3 +1615,90 @@ private struct DrawerInfoRow: View {
     }
 }
 
+// MARK: - 统一就地精美提示组件 (替代全局侵入式红条，对标 Surge 细腻微胶囊)
+public enum InlineStatusKind: Equatable {
+    case success(String)
+    case warning(String)
+    case error(String)
+    case info(String)
+    case loading(String)
+}
+
+public struct InlineStatusPill: View {
+    public let kind: InlineStatusKind
+    public var onDismiss: (() -> Void)? = nil
+
+    public init(kind: InlineStatusKind, onDismiss: (() -> Void)? = nil) {
+        self.kind = kind
+        self.onDismiss = onDismiss
+    }
+
+    public var body: some View {
+        HStack(spacing: 5) {
+            iconView
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .lineLimit(1)
+            if let dismiss = onDismiss {
+                Button(action: dismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(tintColor.opacity(0.8))
+                }
+                .buttonStyle(.plain)
+                .padding(.leading, 2)
+                .help("关闭提示")
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3.5)
+        .background(
+            RoundedRectangle(cornerRadius: AsterMetrics.radiusControl, style: .continuous)
+                .fill(tintColor.opacity(0.10))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: AsterMetrics.radiusControl, style: .continuous)
+                .strokeBorder(tintColor.opacity(0.24), lineWidth: 0.5)
+        )
+        .foregroundStyle(tintColor)
+    }
+
+    @ViewBuilder
+    private var iconView: some View {
+        switch kind {
+        case .success:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 10, weight: .bold))
+        case .warning:
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 10, weight: .bold))
+        case .error:
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 10, weight: .bold))
+        case .info:
+            Image(systemName: "info.circle.fill")
+                .font(.system(size: 10, weight: .bold))
+        case .loading:
+            ProgressView()
+                .controlSize(.mini)
+                .frame(width: 10, height: 10)
+        }
+    }
+
+    private var title: String {
+        switch kind {
+        case .success(let t), .warning(let t), .error(let t), .info(let t), .loading(let t):
+            return t
+        }
+    }
+
+    private var tintColor: Color {
+        switch kind {
+        case .success: return .green
+        case .warning: return .orange
+        case .error: return .red
+        case .info: return .blue
+        case .loading: return .secondary
+        }
+    }
+}

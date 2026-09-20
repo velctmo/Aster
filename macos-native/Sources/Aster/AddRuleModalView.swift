@@ -256,8 +256,7 @@ public struct AddRuleModalView: View {
                                 Button("选取 App…") {
                                     pickApplication()
                                 }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
+                                .buttonStyle(.exquisiteSecondary(height: 24))
                             }
                         }
                     }
@@ -367,10 +366,16 @@ public struct AddRuleModalView: View {
                 // 实时预览徽章
                 HStack(spacing: 4) {
                     Text("预览:").font(.system(size: 10.5)).foregroundColor(.secondary)
-                    Text("\(selectedType.rawValue), \(cleanValue) ➔ \(selectedAction)")
+                    Text("\(selectedType.rawValue), \(cleanValue)")
                         .font(.system(size: 10.5, weight: .medium, design: .monospaced))
                         .foregroundColor(.primary.opacity(0.85))
                         .lineLimit(1)
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 8.5, weight: .bold))
+                        .foregroundColor(.secondary.opacity(0.7))
+                    Text(selectedAction)
+                        .font(.system(size: 10.5, weight: .bold, design: .monospaced))
+                        .foregroundColor(.primary)
                 }
 
                 Spacer()
@@ -382,6 +387,7 @@ public struct AddRuleModalView: View {
                 Button("取消") {
                     onDismiss()
                 }
+                .buttonStyle(.exquisiteSecondary(height: 28, cornerRadius: AsterMetrics.radiusControl))
                 .keyboardShortcut(.cancelAction)
                 .disabled(isSubmitting)
 
@@ -390,12 +396,12 @@ public struct AddRuleModalView: View {
                 } label: {
                     HStack(spacing: 4) {
                         if isSubmitting {
-                            ProgressView().controlSize(.small)
+                            ProgressView().controlSize(.mini).frame(width: 10, height: 10)
                         }
                         Text("添加规则")
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.exquisitePrimary(height: 28, cornerRadius: AsterMetrics.radiusControl))
                 .disabled(cleanValue.isEmpty || isSubmitting)
                 .keyboardShortcut(.defaultAction)
             }
@@ -429,12 +435,14 @@ public struct AddRuleModalView: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
             .frame(maxWidth: .infinity)
-            .background(isSelected ? color.opacity(0.18) : Color.primary.opacity(0.04))
+            .background(
+                RoundedRectangle(cornerRadius: AsterMetrics.radiusControl, style: .continuous)
+                    .fill(isSelected ? color.opacity(0.18) : Color.primary.opacity(0.04))
+            )
             .foregroundColor(isSelected ? color : .secondary)
-            .cornerRadius(6)
             .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(isSelected ? color : Color.clear, lineWidth: 1)
+                RoundedRectangle(cornerRadius: AsterMetrics.radiusControl, style: .continuous)
+                    .stroke(isSelected ? color : Color.clear, lineWidth: 0.8)
             )
         }
         .buttonStyle(.plain)

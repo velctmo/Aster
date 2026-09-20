@@ -244,7 +244,10 @@ func (s *Server) postConfig(w http.ResponseWriter, r *http.Request) {
 	all := s.App.Profiles()
 	if body.Activate && len(all) > 0 {
 		newID := all[len(all)-1].ID
-		_ = s.App.ActivateProfile(newID)
+		if actErr := s.App.ActivateProfile(newID); actErr != nil {
+			writeErr(w, actErr)
+			return
+		}
 	}
 	writeJSON(w, s.App.Profiles())
 }
@@ -473,7 +476,7 @@ func (s *Server) delay(w http.ResponseWriter, r *http.Request) {
 	}
 	d, err := s.App.Delay(body.Tag)
 	if err != nil {
-		writeJSON(w, map[string]any{"tag": body.Tag, "delay": 0, "error": err.Error()})
+		writeJSON(w, map[string]any{"tag": body.Tag, "delay": d, "error": err.Error()})
 		return
 	}
 	writeJSON(w, map[string]any{"tag": body.Tag, "delay": d})

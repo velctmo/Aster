@@ -17,10 +17,6 @@ public struct OutboundsView: View {
         case lowestDelay = "最低延迟优先"
     }
 
-    private let columns = [
-        GridItem(.adaptive(minimum: 220, maximum: 320), spacing: 12)
-    ]
-
     private var sourceOptions: [(id: String, name: String)] {
         var seen = Set<String>()
         return state.nodes.compactMap { node in
@@ -29,54 +25,64 @@ public struct OutboundsView: View {
         }
     }
 
-    private var filteredNodes: [ProxyNode] {
+    private func membersForGroup(_ group: StrategyGroup) -> [String] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        return state.nodes.filter { node in
-            if node.tag == "auto" {
-                return selectedSourceID == "all" && query.isEmpty
+        let hasFilter = !query.isEmpty || selectedSourceID != "all"
+
+        // 1. 过滤：按搜索词与订阅来源
+        let filtered = group.members.filter { tag in
+            guard hasFilter else { return true }
+
+            if tag == "auto" {
+                return query.isEmpty && selectedSourceID == "all"
             }
+            if tag == "direct" || tag == "reject" {
+                if selectedSourceID != "all" { return false }
+                guard !query.isEmpty else { return true }
+                let label = tag == "direct" ? "直连" : "拦截"
+                return label.localizedCaseInsensitiveContains(query) || tag.localizedCaseInsensitiveContains(query)
+            }
+
+            if let nestedGroup = state.strategyGroups.first(where: { $0.tag == tag }) {
+                if selectedSourceID != "all" { return false }
+                guard !query.isEmpty else { return true }
+                return nestedGroup.name.localizedCaseInsensitiveContains(query) ||
+                       nestedGroup.tag.localizedCaseInsensitiveContains(query)
+            }
+
+            guard let node = state.findNode(for: tag) else {
+                guard !query.isEmpty else { return true }
+                let memberTitle = state.memberTitle(for: tag)
+                return memberTitle.localizedCaseInsensitiveContains(query) || tag.localizedCaseInsensitiveContains(query)
+            }
+
             if selectedSourceID != "all" && node.subId != selectedSourceID {
                 return false
             }
+
             guard !query.isEmpty else { return true }
             return node.name.localizedCaseInsensitiveContains(query) ||
-                node.tag.localizedCaseInsensitiveContains(query) ||
-                node.protocolName.localizedCaseInsensitiveContains(query) ||
-                (node.subName?.localizedCaseInsensitiveContains(query) ?? false)
+                   node.tag.localizedCaseInsensitiveContains(query) ||
+                   node.protocolName.localizedCaseInsensitiveContains(query) ||
+                   (node.subName?.localizedCaseInsensitiveContains(query) ?? false)
         }
-    }
 
-    private var sortedNodes: [ProxyNode] {
-        let nodes = filteredNodes
+        // 2. 排序：按最低延迟优先或默认顺序
         switch sortOption {
         case .defaultOrder:
-            return nodes
+            return filtered
         case .lowestDelay:
-            // 防抖锁：如果正在全量测速中，保持现有视图顺序不频繁重排防跳动
             if !state.testingTags.isEmpty {
-                return nodes
+                return filtered
             }
-            return nodes.sorted { a, b in
-                let da = a.delayMs
-                let db = b.delayMs
-                // 1. 两者均测通且大于 0：延迟越低越靠前
-                if da > 0 && db > 0 {
-                    return da < db
-                }
-                // 2. 一个测通，一个未测（0）或超时（<0）：测通的优先
-                if da > 0 && db <= 0 {
-                    return true
-                }
-                if da <= 0 && db > 0 {
-                    return false
-                }
-                // 3. 两者均未测通：未测速 (0) 优于 超时/异常 (<0)
-                if da == 0 && db < 0 {
-                    return true
-                }
-                if da < 0 && db == 0 {
-                    return false
-                }
+            return filtered.sorted { a, b in
+                let da = state.memberDelay(for: a)
+                let db = state.memberDelay(for: b)
+                if da > 0 && db > 0 { return da < db }
+                if da > 0 && db <= 0 { return true }
+                if da <= 0 && db > 0 { return false }
+                if da == 0 && db < 0 { return true }
+                if da < 0 && db == 0 { return false }
                 return false
             }
         }
@@ -85,22 +91,7 @@ public struct OutboundsView: View {
     @ViewBuilder
     private var headerActions: some View {
         HStack(spacing: 10) {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").foregroundColor(.secondary)
-                TextField("搜索节点", text: $searchText)
-                    .textFieldStyle(.plain)
-                if !searchText.isEmpty {
-                    Button { searchText = "" } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundColor(.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("清除节点搜索")
-                }
-            }
-            .padding(.horizontal, 8).padding(.vertical, 5)
-            .background(Color(NSColor.controlBackgroundColor).opacity(0.6))
-            .clipShape(RoundedRectangle(cornerRadius: 7))
-            .frame(maxWidth: 190)
+            ExquisiteSearchField(placeholder: "搜索节点…", text: $searchText, maxWidth: 190)
 
             if !sourceOptions.isEmpty {
                 Picker("来源", selection: $selectedSourceID) {
@@ -146,84 +137,7 @@ public struct OutboundsView: View {
         }
     }
 
-    // MARK: - 策略组卡片头部
-    private var policyGroupHeader: some View {
-        HStack(alignment: .center, spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(Color.blue.opacity(0.12))
-                    .frame(width: 38, height: 38)
-                Image(systemName: "square.stack.3d.up.fill")
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundColor(.blue)
-            }
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 8) {
-                    Text("全部节点")
-                        .font(.system(size: 15, weight: .bold))
-
-                    Text("PROXY")
-                        .font(.system(size: 10, weight: .heavy, design: .monospaced))
-                        .foregroundColor(.blue)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.blue.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-
-                    Text("SELECTOR")
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 2)
-                        .background(Color.secondary.opacity(0.12))
-                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-
-                    Text("默认主策略组")
-                        .font(.system(size: 10.5))
-                        .foregroundColor(.secondary)
-                }
-
-                HStack(spacing: 8) {
-                    Text("当前出站:")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-
-                    let activeLabel = state.status.selectedLabel.isEmpty ? "自动选择" : state.status.selectedLabel
-                    Text(activeLabel)
-                        .font(.system(size: 11.5, weight: .semibold))
-                        .foregroundColor(.primary)
-
-                    if state.status.delayMs > 0 {
-                        Text("\(state.status.delayMs) ms")
-                            .font(.system(size: 10.5, weight: .bold, design: .monospaced))
-                            .foregroundColor(.green)
-                    } else if state.status.delayMs < 0 {
-                        Text("超时")
-                            .font(.system(size: 10.5, weight: .bold, design: .monospaced))
-                            .foregroundColor(.red)
-                    }
-
-                    Text("·  \(state.nodes.count) 个可用子节点")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            Spacer()
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(Color.primary.opacity(0.025))
-        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.8)
-        )
-        .padding(.horizontal, DesignTokens.pagePadding)
-        .padding(.top, 12)
-        .padding(.bottom, 4)
-    }
 
     @ViewBuilder
     private var emptyState: some View {
@@ -235,7 +149,7 @@ public struct OutboundsView: View {
             Text("暂无可用节点")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundColor(.secondary)
-            Text("请先在「设置 - 配置」中添加订阅或导入节点")
+            Text("请先在「配置」中添加订阅或导入节点")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary)
             Spacer()
@@ -275,27 +189,36 @@ public struct OutboundsView: View {
         )
 
         let currentLabel = state.selectedLabel(in: group)
+        let members = membersForGroup(group)
 
         VStack(alignment: .leading, spacing: 0) {
             DisclosureGroup(isExpanded: expanded) {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 155, maximum: 230), spacing: 8)], spacing: 8) {
-                    ForEach(group.members, id: \.self) { tag in
-                        let node = state.findNode(for: tag)
-                        GroupNodeCard(
-                            tag: tag,
-                            node: node,
-                            isSelector: state.canSelectMember(group: group, tag: tag),
-                            isSelected: state.isMemberSelected(group: group, tag: tag),
-                            isTesting: state.isNodeTesting(tag),
-                            onSelect: {
-                                state.selectStrategyGroupNode(group: group, tag: tag)
-                            },
-                            onTest: StrategyPresentation.canTest(tag: tag) ? { state.testNodeDelay(tag) } : nil
-                        )
+                if members.isEmpty {
+                    Text("无匹配节点")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 14)
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 155, maximum: 230), spacing: 8)], spacing: 8) {
+                        ForEach(members, id: \.self) { tag in
+                            let node = state.findNode(for: tag)
+                            GroupNodeCard(
+                                tag: tag,
+                                node: node,
+                                isSelector: state.canSelectMember(group: group, tag: tag),
+                                isSelected: state.isMemberSelected(group: group, tag: tag),
+                                isTesting: state.isNodeTesting(tag),
+                                onSelect: {
+                                    state.selectStrategyGroupNode(group: group, tag: tag)
+                                },
+                                onTest: StrategyPresentation.canTest(tag: tag) ? { state.testNodeDelay(tag) } : nil
+                            )
+                        }
                     }
+                    .padding(.top, 10)
+                    .padding(.bottom, 8)
                 }
-                .padding(.top, 10)
-                .padding(.bottom, 8)
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: group.type == "selector" ? "square.stack.3d.up.fill" : "arrow.triangle.branch")
@@ -325,18 +248,30 @@ public struct OutboundsView: View {
                     }
 
                     if !currentLabel.isEmpty {
-                        Text("➔")
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.secondary.opacity(0.6))
-                        Text(currentLabel.truncated(toVisualWidth: 18))
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundColor(.blue)
+                        HStack(spacing: 5) {
+                            Image(systemName: "arrow.right")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(.secondary.opacity(0.6))
+                            Text(currentLabel.truncated(toVisualWidth: 18))
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.blue)
+
+                            let activeTag = state.selectedTag(in: group)
+                            let activeDelay = state.memberDelay(for: activeTag)
+                            if activeDelay != 0 {
+                                LatencyBadge(delayMs: activeDelay, isTesting: state.isNodeTesting(activeTag))
+                            }
+                        }
                     }
 
                     Spacer()
 
                     if !isGroupTesting {
-                        Text("\(group.leafTags.count) 节点").font(.caption).foregroundStyle(.secondary)
+                        if members.count != group.members.count {
+                            Text("\(members.count) / \(group.members.count) 节点").font(.caption).foregroundStyle(.secondary)
+                        } else {
+                            Text("\(group.leafTags.count) 节点").font(.caption).foregroundStyle(.secondary)
+                        }
                     }
 
                     Button {
@@ -352,8 +287,7 @@ public struct OutboundsView: View {
                             Text(isGroupTesting ? "测速中" : "测速")
                         }
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
+                    .buttonStyle(.exquisitePill(height: 22))
                     .disabled(!state.status.running || group.leafTags.isEmpty || isGroupTesting)
                 }
                 .contentShape(Rectangle())
@@ -361,12 +295,14 @@ public struct OutboundsView: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(Color.primary.opacity(0.02))
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.06), lineWidth: 0.8)
+        .background(
+            RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
+                .fill(.ultraThinMaterial)
         )
+        .overlay(
+            NativeHairlineBorder(cornerRadius: AsterMetrics.radiusCard)
+        )
+        .shadow(color: Color.black.opacity(0.03), radius: 6, x: 0, y: 1.5)
         .padding(.horizontal, DesignTokens.pagePadding)
         .onAppear {
             if group.tag == state.status.selected || group.tag == "proxy" { expandedGroupTags.insert(group.tag) }
@@ -380,44 +316,22 @@ public struct OutboundsView: View {
         }
     }
 
-    @ViewBuilder
-    private func latencyText(_ delay: Int, testing: Bool) -> some View {
-        if testing {
-            Text("测速中…").foregroundStyle(.blue)
-        } else if delay < 0 {
-            Text("超时").foregroundStyle(Color(red: 0.85, green: 0.38, blue: 0.38))
-        } else if delay == 0 {
-            Text("---").foregroundStyle(.secondary)
-        } else {
-            let col = delay <= 150 ? Color(red: 0.22, green: 0.72, blue: 0.48) : (delay <= 500 ? Color(red: 0.88, green: 0.62, blue: 0.22) : Color(red: 0.85, green: 0.38, blue: 0.38))
-            Text("\(delay) ms").foregroundStyle(col)
-        }
-    }
-
     // MARK: - 顶置全局出站分流模式控制器 (规则判定 / 全局代理 / 直接连接)
     private var outboundModeBar: some View {
         HStack(spacing: 12) {
-            HStack(spacing: 3) {
-                modeSegmentButton(mode: "rule", label: "规则判定", code: "RULE", icon: "arrow.triangle.branch")
-                modeSegmentButton(mode: "global", label: "全局代理", code: "GLOBAL", icon: "globe.asia.australia.fill")
-                modeSegmentButton(mode: "direct", label: "直接连接", code: "DIRECT", icon: "bolt.horizontal.fill")
-            }
-            .padding(3)
-            .background(Color.primary.opacity(0.04))
-            .clipShape(.rect(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.6)
-            )
+            ModeSegmentedControl(selectedMode: Binding(
+                get: { state.status.mode },
+                set: { state.setMode($0) }
+            ))
 
             Spacer()
 
-            // 模式语义指示微标
+            let currentMode = AppMode.from(string: state.status.mode)
             HStack(spacing: 6) {
                 Circle()
-                    .fill(modeColor)
+                    .fill(currentMode.color)
                     .frame(width: 6, height: 6)
-                Text(modeDescription)
+                Text(currentMode.description)
                     .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
@@ -425,56 +339,6 @@ public struct OutboundsView: View {
         .padding(.horizontal, DesignTokens.pagePadding)
         .padding(.vertical, 8)
         .background(Color(NSColor.windowBackgroundColor).opacity(0.4))
-    }
-
-    private var modeColor: Color {
-        switch state.status.mode {
-        case "global": return .blue
-        case "direct": return Color(red: 0.88, green: 0.62, blue: 0.22)
-        default: return Color(red: 0.22, green: 0.72, blue: 0.48)
-        }
-    }
-
-    private var modeDescription: String {
-        switch state.status.mode {
-        case "global": return "全局代理：全部流量经由当前选中的代理节点转发"
-        case "direct": return "直接连接：全部流量直接发起请求，不经过任何代理"
-        default: return "规则判定：依据分流规则自动判定代理直连或阻断"
-        }
-    }
-
-    private func modeSegmentButton(mode: String, label: String, code: String, icon: String) -> some View {
-        let isSelected = state.status.mode == mode
-        return Button(action: {
-            state.setMode(mode)
-        }) {
-            HStack(spacing: 5) {
-                Image(systemName: icon)
-                    .font(.system(size: 11, weight: isSelected ? .bold : .medium))
-                Text(label)
-                    .font(.system(size: 11.5, weight: isSelected ? .semibold : .regular))
-                Text(code)
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundStyle(isSelected ? Color.blue : Color.secondary.opacity(0.7))
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 4.5)
-            .background(
-                isSelected ?
-                    RoundedRectangle(cornerRadius: 6.5)
-                        .fill(Color(NSColor.controlBackgroundColor))
-                        .shadow(color: Color.black.opacity(0.08), radius: 2, x: 0, y: 1)
-                    : nil
-            )
-            .overlay(
-                isSelected ?
-                    RoundedRectangle(cornerRadius: 6.5)
-                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.6)
-                    : nil
-            )
-            .foregroundStyle(isSelected ? Color.primary : Color.secondary)
-        }
-        .buttonStyle(.plain)
     }
 
     public var body: some View {
@@ -522,144 +386,6 @@ public struct OutboundsView: View {
             if selectedSourceID != "all" && !ids.contains(selectedSourceID) {
                 selectedSourceID = "all"
             }
-        }
-    }
-}
-
-public struct NodeCardView: View {
-    public var node: ProxyNode
-    public var isSelected: Bool
-    public var isTesting: Bool = false
-    public var isSpeedTesting: Bool = false
-    public var onSelect: () -> Void
-    public var onTest: () -> Void
-    public var onSpeedTest: () -> Void
-
-    @AppStorage("showNodeBandwidthBadge") private var showNodeBandwidthBadge: Bool = true
-    @State private var isHovered = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var cardContent: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                ProtocolBadge(proto: node.protocolName, isSelected: isSelected)
-
-                Spacer()
-
-                HStack(spacing: 5) {
-                    if isHovered && !isTesting && !isSpeedTesting {
-                        Button(action: onTest) {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-						.accessibilityLabel("测试节点延迟")
-                        .help("测试节点延迟 (Ping)")
-
-                        Button(action: onSpeedTest) {
-                            Image(systemName: "bolt")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(.purple)
-                        }
-                        .buttonStyle(.plain)
-						.accessibilityLabel("测试节点带宽")
-                        .help("测试真实下行带宽吞吐 (Speedtest)")
-                    }
-                    LatencyBadge(delayMs: node.delayMs, isTesting: isTesting)
-                }
-            }
-
-            Text(NodeNameSanitizer.clean(node.name))
-                .font(.system(size: 13, weight: isSelected ? .bold : .medium))
-                .foregroundStyle(isSelected ? Color.blue : Color.primary)
-                .lineLimit(2)
-                .frame(height: 36, alignment: .topLeading)
-
-            HStack(spacing: 6) {
-                if let sub = node.subName, !sub.isEmpty {
-                    Text(NodeNameSanitizer.clean(sub))
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-                Spacer()
-
-                // 3.2 真实带宽峰值徽章与测速状态
-                if isSpeedTesting {
-                    HStack(spacing: 3) {
-                        ProgressView().controlSize(.mini)
-                        Text("测速中...")
-                            .font(.system(size: 9.5, weight: .semibold))
-                    }
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(Color.purple.opacity(0.12))
-                    .foregroundStyle(.purple)
-                    .clipShape(Capsule())
-                } else if showNodeBandwidthBadge, let mbps = node.bandwidthMbps, mbps > 0 {
-                    HStack(spacing: 2) {
-                        Image(systemName: "bolt.fill")
-                            .font(.system(size: 8.5))
-                        Text(String(format: "%.1f M", mbps))
-                            .font(.system(size: 9.5, weight: .bold, design: .monospaced))
-                    }
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(Color.purple.opacity(0.12))
-                    .foregroundStyle(.purple)
-                    .clipShape(Capsule())
-                    .help("真实下行峰值带宽: \(mbps) Mbps")
-                }
-
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.blue)
-                        .font(.system(size: 14))
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var cardBackground: some View {
-        if isSelected {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.blue.opacity(0.12))
-        } else {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(.ultraThinMaterial)
-        }
-    }
-
-    private var cardBorder: some View {
-        Group {
-            if isSelected {
-                RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(Color.blue.opacity(0.85), lineWidth: 1.5)
-            } else {
-                LiquidGlassBevelBorder(cornerRadius: 12, lineWidth: isHovered ? 1.0 : 0.8)
-            }
-        }
-    }
-
-    public var body: some View {
-        Button(action: onSelect) {
-            cardContent
-                .padding(12)
-                .background(cardBackground)
-                .overlay(cardBorder)
-                .shadow(color: isSelected ? Color.blue.opacity(0.15) : Color.black.opacity(0.04), radius: isHovered ? 6 : 2, y: 2)
-                .scaleEffect(isHovered ? 1.01 : 1.0)
-                .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.7), value: isHovered)
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
-        .contextMenu {
-            Button("选择为活动节点") { onSelect() }
-            Divider()
-            Button("测试延迟 (Ping)") { onTest() }
-            Button("测试真实峰值带宽 (Speedtest)") { onSpeedTest() }
         }
     }
 }
@@ -750,10 +476,14 @@ public struct GroupNodeCard: View {
         HStack {
             if isAutoNode {
                 if let winner = autoWinnerName {
-                    Text("➔ \(NodeNameSanitizer.clean(winner))")
-                        .font(.system(size: 9.5, weight: .medium))
-                        .foregroundColor(isSelected ? Color.indigo.opacity(0.9) : .secondary)
-                        .lineLimit(1)
+                    HStack(spacing: 3) {
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 8, weight: .bold))
+                        Text(NodeNameSanitizer.clean(winner))
+                            .lineLimit(1)
+                    }
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundColor(isSelected ? Color.indigo.opacity(0.9) : .secondary)
                 } else {
                     Text("内核智能测速")
                         .font(.system(size: 9.5))
@@ -776,13 +506,18 @@ public struct GroupNodeCard: View {
     }
 
     private var cardBackground: some View {
-        RoundedRectangle(cornerRadius: 8)
+        RoundedRectangle(cornerRadius: AsterMetrics.radiusControl, style: .continuous)
             .fill(isSelected ? accentColor.opacity(0.12) : Color.primary.opacity(isHovered ? 0.05 : 0.025))
     }
 
+    @ViewBuilder
     private var cardBorder: some View {
-        RoundedRectangle(cornerRadius: 8)
-            .strokeBorder(isSelected ? accentColor.opacity(0.75) : Color.primary.opacity(isHovered ? 0.15 : 0.08), lineWidth: isSelected ? 1.2 : 0.8)
+        if isSelected {
+            RoundedRectangle(cornerRadius: AsterMetrics.radiusControl, style: .continuous)
+                .strokeBorder(accentColor.opacity(0.75), lineWidth: 1.0)
+        } else {
+            NativeHairlineBorder(cornerRadius: AsterMetrics.radiusControl, lineWidth: isHovered ? 0.8 : 0.5)
+        }
     }
 
     public var body: some View {

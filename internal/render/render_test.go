@@ -307,32 +307,33 @@ func parseStrategyOutbounds(t *testing.T, raw []byte) (proxy []string, groups []
 	return proxy, groups, hasAuto
 }
 
-func TestConfigUsesExplicitDirectHTTPClientForRemoteRuleSets(t *testing.T) {
+func TestConfigCrossVersionCompatibility(t *testing.T) {
 	b, err := Config(state.DefaultFile(), t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
 	var cfg struct {
-		HTTPClients []struct {
-			Tag string `json:"tag"`
-		} `json:"http_clients"`
+		DNS struct {
+			Servers []map[string]any `json:"servers"`
+			Rules   []map[string]any `json:"rules"`
+		} `json:"dns"`
 		Route struct {
-			DefaultHTTPClient string           `json:"default_http_client"`
-			RuleSet           []map[string]any `json:"rule_set"`
+			DefaultDomainResolver string           `json:"default_domain_resolver"`
+			RuleSet               []map[string]any `json:"rule_set"`
 		} `json:"route"`
 	}
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.HTTPClients) != 1 || cfg.HTTPClients[0].Tag != "rule-set-direct" {
-		t.Fatalf("unexpected HTTP clients: %+v", cfg.HTTPClients)
+	if cfg.Route.DefaultDomainResolver != "bootstrap" {
+		t.Fatalf("expected default_domain_resolver=bootstrap, got %q", cfg.Route.DefaultDomainResolver)
 	}
-	if cfg.Route.DefaultHTTPClient != "rule-set-direct" {
-		t.Fatalf("default HTTP client=%q", cfg.Route.DefaultHTTPClient)
-	}
-	for _, ruleSet := range cfg.Route.RuleSet {
-		if _, legacy := ruleSet["download_detour"]; legacy {
-			t.Fatalf("deprecated download_detour emitted: %+v", ruleSet)
+	// Verify fakeip does not contain unsupported inet6_range when tun is IPv4 only
+	for _, srv := range cfg.DNS.Servers {
+		if srv["type"] == "fakeip" {
+			if _, hasInet6 := srv["inet6_range"]; hasInet6 {
+				t.Fatalf("fakeip should not configure inet6_range when TUN has no IPv6 subnet")
+			}
 		}
 	}
 }
@@ -458,9 +459,7 @@ func TestSingBoxValidationIfAvailable(t *testing.T) {
 	if err != nil {
 		t.Skip("本地环境未检测到可用的 sing-box 二进制，跳过集成验证测试")
 	}
-	if !isSingBoxAtLeast114(bin) {
-		t.Skipf("检测到的 sing-box 二进制 (%s) 版本低于 1.14.0，跳过针对 1.14+ 语法的集成校验测试", bin)
-	}
+	// Config is now backwards-compatible across sing-box 1.13 and 1.14!
 
 	f := state.DefaultFile()
 	f.Settings.MixedPort = 29080
@@ -1049,5 +1048,72 @@ func TestSingBoxCheck_AllNewProtocols(t *testing.T) {
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("sing-box check failed: %v, output: %s", err, string(out))
+	}
+}
+
+func TestConfig_ShadowsocksObfsNormalized_SingBoxCheck(t *testing.T) {
+	f := state.DefaultFile()
+	f.Profiles[0].Kind = state.ProfileKindNodes
+	f.Profiles[0].Sources = []state.ConfigSource{
+		{
+			ID:  "source-obfs",
+			URL: "https://example.com/sub",
+			Nodes: []state.Node{
+				{
+					ID:       "ss-obfs-1",
+					Name:     "香港 IEPL 专线 1",
+					Protocol: "shadowsocks",
+					Outbound: json.RawMessage(`{
+						"type": "shadowsocks",
+						"tag": "hk-1",
+						"server": "1.2.3.4",
+						"server_port": 10011,
+						"method": "aes-128-gcm",
+						"password": "secretpassword",
+						"plugin": "obfs",
+						"plugin_opts": "mode=http;host=example.com"
+					}`),
+				},
+			},
+		},
+	}
+
+	dataDir := t.TempDir()
+	b, err := Config(f, dataDir)
+	if err != nil {
+		t.Fatalf("Config failed: %v", err)
+	}
+
+	var parsed struct {
+		Outbounds []map[string]any `json:"outbounds"`
+	}
+	if err := json.Unmarshal(b, &parsed); err != nil {
+		t.Fatalf("unmarshal config: %v", err)
+	}
+
+	found := false
+	for _, ob := range parsed.Outbounds {
+		if ob["type"] == "shadowsocks" {
+			found = true
+			if ob["plugin"] != "obfs-local" {
+				t.Fatalf("expected obfs-local, got %v", ob["plugin"])
+			}
+		}
+	}
+	if !found {
+		t.Fatal("shadowsocks outbound not found")
+	}
+
+	bin := "../../vendor/cores/sing-box-1.14.0-darwin-arm64"
+	if _, err := os.Stat(bin); err == nil {
+		tmpFile := filepath.Join(dataDir, "config.json")
+		if err := os.WriteFile(tmpFile, b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(bin, "check", "-c", tmpFile)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("sing-box check failed: %v, output: %s", err, string(out))
+		}
 	}
 }

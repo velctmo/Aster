@@ -15,7 +15,6 @@
 		C0D887B7B6E04E1C99D1C7F7 /* AsterApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94449F43A2C042C09948E47B /* AsterApp.swift */; };
 		1048A0DF7B8C49ECA9D3E856 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60F5E942692548D5AFFF244B /* Models.swift */; };
 		8C728EED56324F838DA7DA4E /* UIComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C874DCD6D794C8987FC077F /* UIComponents.swift */; };
-		ED2C9E3889D0418692F45BDA /* Views.swift in Sources */ = {isa = PBXBuildFile; fileRef = 55388AA439744F179FBC6E51 /* Views.swift */; };
 		6674B401E7F3476BADCED090 /* ViewsActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0AD11C0A5914E71AFE12687 /* ViewsActivity.swift */; };
 		F3488272E1F9452EBC5E5938 /* ViewsMain.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5D233BA858845B1BBFAC47D /* ViewsMain.swift */; };
 		307E14D3592C4A18AB275E0C /* ViewsOutbounds.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DB696D82C1041A68E3FE3B5 /* ViewsOutbounds.swift */; };
@@ -49,7 +48,6 @@
 		94449F43A2C042C09948E47B /* AsterApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AsterApp.swift; sourceTree = "<group>"; };
 		60F5E942692548D5AFFF244B /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		7C874DCD6D794C8987FC077F /* UIComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIComponents.swift; sourceTree = "<group>"; };
-		55388AA439744F179FBC6E51 /* Views.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views.swift; sourceTree = "<group>"; };
 		E0AD11C0A5914E71AFE12687 /* ViewsActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewsActivity.swift; sourceTree = "<group>"; };
 		B5D233BA858845B1BBFAC47D /* ViewsMain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewsMain.swift; sourceTree = "<group>"; };
 		3DB696D82C1041A68E3FE3B5 /* ViewsOutbounds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ViewsOutbounds.swift; sourceTree = "<group>"; };
@@ -105,7 +103,6 @@
 				94449F43A2C042C09948E47B /* AsterApp.swift */,
 				60F5E942692548D5AFFF244B /* Models.swift */,
 				7C874DCD6D794C8987FC077F /* UIComponents.swift */,
-				55388AA439744F179FBC6E51 /* Views.swift */,
 				E0AD11C0A5914E71AFE12687 /* ViewsActivity.swift */,
 				B5D233BA858845B1BBFAC47D /* ViewsMain.swift */,
 				3DB696D82C1041A68E3FE3B5 /* ViewsOutbounds.swift */,
@@ -228,7 +225,6 @@
 				C0D887B7B6E04E1C99D1C7F7 /* AsterApp.swift in Sources */,
 				1048A0DF7B8C49ECA9D3E856 /* Models.swift in Sources */,
 				8C728EED56324F838DA7DA4E /* UIComponents.swift in Sources */,
-				ED2C9E3889D0418692F45BDA /* Views.swift in Sources */,
 				6674B401E7F3476BADCED090 /* ViewsActivity.swift in Sources */,
 				F3488272E1F9452EBC5E5938 /* ViewsMain.swift in Sources */,
 				307E14D3592C4A18AB275E0C /* ViewsOutbounds.swift in Sources */,

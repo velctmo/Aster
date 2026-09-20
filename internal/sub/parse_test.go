@@ -48,6 +48,48 @@ proxies:
 	}
 }
 
+func TestParseClashYAML_ShadowsocksObfs(t *testing.T) {
+	raw := `
+proxies:
+  - name: hk-obfs
+    type: ss
+    server: 1.2.3.4
+    port: 8388
+    cipher: aes-128-gcm
+    password: pwd
+    plugin: obfs
+    plugin-opts:
+      mode: http
+      host: example.com
+  - name: hk-simple-obfs
+    type: ss
+    server: 1.2.3.4
+    port: 8388
+    cipher: aes-128-gcm
+    password: pwd
+    plugin: simple-obfs
+    plugin-opts:
+      mode: tls
+      host: example.com
+`
+	r, err := Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Nodes) != 2 {
+		t.Fatalf("expected 2 nodes, got %d", len(r.Nodes))
+	}
+	for i, n := range r.Nodes {
+		var m map[string]any
+		if err := json.Unmarshal(n.Outbound, &m); err != nil {
+			t.Fatalf("node %d: %v", i, err)
+		}
+		if m["plugin"] != "obfs-local" {
+			t.Fatalf("node %d: expected plugin obfs-local, got %v", i, m["plugin"])
+		}
+	}
+}
+
 func TestParseSingBox(t *testing.T) {
 	raw := `{"outbounds":[{"type":"trojan","tag":"t1","server":"a.com","server_port":443,"password":"x","tls":{"enabled":true}}]}`
 	r, err := Parse(raw)
@@ -90,7 +132,7 @@ func TestParseAnyTLSStripsTFO(t *testing.T) {
 
 func TestFilterNodes(t *testing.T) {
 	nodes := []state.Node{{Name: "香港01"}, {Name: "美国01"}}
-	out := FilterNodes(nodes, "美国")
+	out := CleanAndFilterNodes(nodes, "美国")
 	if len(out) != 1 || out[0].Name != "香港01" {
 		t.Fatalf("%+v", out)
 	}
@@ -864,5 +906,43 @@ proxies:
 			t.Fatalf("expected tls server_name domain.example.com, got %v", tls["server_name"])
 		}
 	})
+}
+
+func TestParseShadowTLS_URI(t *testing.T) {
+	raw := "shadowtls://my-secret@example.com:8443?sni=server.com&version=3&strict=1#ShadowNode"
+	r, err := Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+	if len(r.Nodes) != 1 {
+		t.Fatalf("expected 1 node, got %d", len(r.Nodes))
+	}
+	node := r.Nodes[0]
+	if node.Protocol != "shadowtls" {
+		t.Fatalf("expected protocol shadowtls, got %s", node.Protocol)
+	}
+	if node.Name != "ShadowNode" {
+		t.Fatalf("expected name ShadowNode, got %s", node.Name)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(node.Outbound, &m); err != nil {
+		t.Fatalf("unmarshal outbound: %v", err)
+	}
+	if m["type"] != "shadowtls" {
+		t.Fatalf("expected type shadowtls, got %v", m["type"])
+	}
+	if m["password"] != "my-secret" {
+		t.Fatalf("expected password my-secret, got %v", m["password"])
+	}
+	if m["version"] != float64(3) {
+		t.Fatalf("expected version 3, got %v", m["version"])
+	}
+	if m["strict_mode"] != true {
+		t.Fatalf("expected strict_mode true, got %v", m["strict_mode"])
+	}
+	tls, ok := m["tls"].(map[string]any)
+	if !ok || tls["server_name"] != "server.com" {
+		t.Fatalf("expected tls server_name server.com, got %v", tls)
+	}
 }
 

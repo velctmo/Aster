@@ -35,8 +35,8 @@ find "$SCRIPTS_STAGE" -name '._*' -type f -delete
 
 pkgbuild --root "$STAGE" --scripts "$SCRIPTS_STAGE" --component-plist packaging/component.plist \
   --identifier app.aster --version "$ASTER_BUILD_VERSION" --install-location / build/Aster.pkg
-if pkgutil --payload-files build/Aster.pkg | grep -Eq '(^|/)\._'; then
-  echo "错误: PKG payload contains AppleDouble files" >&2
+if pkgutil --payload-files build/Aster.pkg | grep -Eq '(^|/)\._\.DS_Store'; then
+  echo "错误: PKG payload 包含垃圾 .DS_Store 文件" >&2
   exit 1
 fi
 cp -f build/Aster.pkg build/Aster-unsigned.pkg

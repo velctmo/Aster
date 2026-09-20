@@ -3,15 +3,11 @@ package app
 import (
 	"encoding/json"
 	"fmt"
-	"net"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
-	"time"
 
 	"aster/internal/clash"
 	"aster/internal/helper"
@@ -86,137 +82,6 @@ func validateSettings(s state.Settings) error {
 	return nil
 }
 
-func parseNodeEndpoint(raw json.RawMessage) (string, int) {
-	if len(raw) == 0 {
-		return "", 0
-	}
-	var meta struct {
-		Server     string `json:"server"`
-		ServerPort int    `json:"server_port"`
-		Port       int    `json:"port"`
-		Address    string `json:"address"`
-	}
-	if err := json.Unmarshal(raw, &meta); err != nil {
-		return "", 0
-	}
-	host := meta.Server
-	if host == "" {
-		host = meta.Address
-	}
-	port := meta.ServerPort
-	if port == 0 {
-		port = meta.Port
-	}
-	return strings.TrimSpace(host), port
-}
-
-func isAnycastCDN(host string) bool {
-	h := strings.ToLower(strings.TrimSpace(host))
-	if strings.Contains(h, "cloudflare") || strings.Contains(h, "cfyes") || strings.Contains(h, "cloudfront") ||
-		strings.Contains(h, "fastly") || strings.Contains(h, "akamai") || strings.Contains(h, "cdn") {
-		return true
-	}
-	return false
-}
-
-func tcpPingBound(host string, port int, timeout time.Duration) (int, error) {
-	if host == "" || port <= 0 {
-		return -1, fmt.Errorf("无效的节点地址")
-	}
-	targetHost := host
-	// 预先解析域名获取目标 IP，避免将 DNS 查询耗时计入单次往返握手延迟（严格对标 Surge TCP Ping 机制）
-	ips, err := net.LookupIP(host)
-	if err == nil && len(ips) > 0 {
-		targetHost = ips[0].String()
-	}
-	targetAddr := net.JoinHostPort(targetHost, strconv.Itoa(port))
-
-	// 动态检测活动物理网卡（优先 en0），彻底绕过本地虚拟网卡（Surge / utun / VPN）劫持
-	var ifIndex int
-	if ifi, err := net.InterfaceByName("en0"); err == nil && (ifi.Flags&net.FlagUp != 0) {
-		ifIndex = ifi.Index
-	} else {
-		ifaces, _ := net.Interfaces()
-		for _, ifi := range ifaces {
-			if strings.HasPrefix(ifi.Name, "en") && ifi.Flags&net.FlagUp != 0 && ifi.Flags&net.FlagLoopback == 0 {
-				ifIndex = ifi.Index
-				break
-			}
-		}
-	}
-
-	dialer := net.Dialer{
-		Timeout: timeout,
-		Control: func(network, address string, c syscall.RawConn) error {
-			if ifIndex > 0 {
-				return c.Control(func(fd uintptr) {
-					// macOS (darwin): IP_BOUND_IF = 25, IPV6_BOUND_IF = 125
-					_ = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IP, 25, ifIndex)
-					_ = syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IPV6, 125, ifIndex)
-				})
-			}
-			return nil
-		},
-	}
-	start := time.Now()
-	conn, err := dialer.Dial("tcp", targetAddr)
-	if err != nil {
-		return -1, err
-	}
-	_ = conn.Close()
-	delay := int(time.Since(start).Milliseconds())
-	if delay <= 0 {
-		delay = 1
-	}
-	return delay, nil
-}
-
-func (a *App) findOutboundEndpoint(tag string) (string, int) {
-	// 1. 优先从当前运行时 config.json 中精准匹配（包含所有订阅与覆写生成节点）
-	configBytes, err := os.ReadFile(filepath.Join(a.st.Dir(), "config.json"))
-	if err == nil && len(configBytes) > 0 {
-		var doc struct {
-			Outbounds []struct {
-				Tag        string `json:"tag"`
-				Server     string `json:"server"`
-				ServerPort int    `json:"server_port"`
-				Port       int    `json:"port"`
-				Address    string `json:"address"`
-			} `json:"outbounds"`
-		}
-		if json.Unmarshal(configBytes, &doc) == nil {
-			for _, ob := range doc.Outbounds {
-				if ob.Tag == tag || strings.Contains(tag, ob.Tag) || strings.Contains(ob.Tag, tag) {
-					host := ob.Server
-					if host == "" {
-						host = ob.Address
-					}
-					port := ob.ServerPort
-					if port == 0 {
-						port = ob.Port
-					}
-					if host != "" && port > 0 {
-						return host, port
-					}
-				}
-			}
-		}
-	}
-	// 2. 从 activeMergedNodes 辅助匹配
-	f := a.st.Active()
-	if mergedNodes, _ := a.activeMergedNodes(f); len(mergedNodes) > 0 {
-		for _, mn := range mergedNodes {
-			if mn.Tag == tag || mn.NodeID == tag || mn.Name == tag || strings.Contains(tag, mn.Name) || strings.Contains(mn.Name, tag) {
-				host, port := parseNodeEndpoint(mn.Outbound)
-				if host != "" && port > 0 {
-					return host, port
-				}
-			}
-		}
-	}
-	return "", 0
-}
-
 func (a *App) Delay(tag string) (int, error) {
 	if !a.core.Running() {
 		return 0, fmt.Errorf("核心未运行，无法测速")
@@ -262,25 +127,14 @@ func (a *App) Delay(tag string) (int, error) {
 	if timeoutMs <= 0 || timeoutMs > 2500 {
 		timeoutMs = 2000 // 极速超时熔断
 	}
-	timeoutDur := time.Duration(timeoutMs) * time.Millisecond
 
-	tcpHost, tcpPort := a.findOutboundEndpoint(tag)
-	if tcpHost == "" || tcpPort == 0 {
-		tcpHost, tcpPort = a.findOutboundEndpoint(realTag)
+	targetURL := f.Settings.DelayURL
+	if targetURL == "" {
+		targetURL = state.DefaultDelayURL
 	}
 
-	var d int
-	var err error
-	if tcpHost != "" && tcpPort > 0 {
-		// Surge 级物理网卡绑定握手探测：彻底绕过本地虚拟网卡（Surge TUN / VPN）拦截，测出真实单向往返 RTT
-		d, err = tcpPingBound(tcpHost, tcpPort, timeoutDur)
-	} else {
-		targetURL := f.Settings.DelayURL
-		if targetURL == "" {
-			targetURL = "http://cp.cloudflare.com/generate_204"
-		}
-		d, err = a.clash.Delay(realTag, targetURL, timeoutMs)
-	}
+	// 经由 sing-box 核心原生真实隧道探测，天然支持全协议 (VLESS/VMess/SS/Trojan/Hysteria2/TUIC/WireGuard)
+	d, err := a.clash.Delay(realTag, targetURL, timeoutMs)
 
 	a.mu.Lock()
 	if err == nil && d > 0 {
@@ -460,13 +314,44 @@ func (a *App) SelectGroupNode(groupTag, nodeTag string) error {
 		if !allowed {
 			return fmt.Errorf("节点不属于策略组 %s", groupTag)
 		}
+		isMain := groupTag == "proxy" || (len(groups) > 0 && groups[0].Tag == groupTag)
 		if !a.core.Running() {
-			return fmt.Errorf("核心未运行，无法选择节点")
+			old := a.st.Get()
+			candidate := state.CloneFile(old)
+			if candidate.SelectorNow == nil {
+				candidate.SelectorNow = map[string]string{}
+			}
+			candidate.SelectorNow[groupTag] = nodeTag
+			if isMain {
+				candidate.Selected = nodeTag
+				if nodeTag != "auto" {
+					candidate.RecentNodes = prepend(candidate.RecentNodes, nodeTag, 8)
+				}
+			}
+			if err := a.applyAndCommitCandidate(old, candidate, func(cur *state.File) {
+				if cur.SelectorNow == nil {
+					cur.SelectorNow = map[string]string{}
+				}
+				cur.SelectorNow[groupTag] = nodeTag
+				if isMain {
+					cur.Selected = nodeTag
+					if nodeTag != "auto" {
+						cur.RecentNodes = prepend(cur.RecentNodes, nodeTag, 8)
+					}
+				}
+			}); err != nil {
+				return err
+			}
+			a.hub.Broadcast("status", a.Status())
+			if updatedGroups, gErr := a.StrategyGroups(); gErr == nil {
+				a.hub.Broadcast("strategy-groups", updatedGroups)
+			}
+			return nil
 		}
+
 		if err := a.clash.Select(groupTag, nodeTag); err != nil {
 			return err
 		}
-		isMain := groupTag == "proxy" || (len(groups) > 0 && groups[0].Tag == groupTag)
 		_, _ = a.st.Update(func(cur *state.File) error {
 			if cur.SelectorNow == nil {
 				cur.SelectorNow = map[string]string{}
@@ -671,14 +556,7 @@ func (a *App) ClashConnections() (*clash.Connections, error) {
 	}
 	for i := range snap.Connections {
 		c := &snap.Connections[i]
-		if strings.TrimSpace(c.Metadata.Process) == "" && c.Metadata.ProcessPath != "" {
-			parts := strings.Split(c.Metadata.ProcessPath, "/")
-			lastPart := parts[len(parts)-1]
-			if idx := strings.Index(lastPart, " ("); idx != -1 {
-				lastPart = lastPart[:idx]
-			}
-			c.Metadata.Process = cleanProcessName(lastPart)
-		}
+		c.Metadata.Process = ResolveProcessName(c.Metadata.Process, c.Metadata.ProcessPath)
 	}
 	return snap, nil
 }

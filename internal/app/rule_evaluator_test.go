@@ -137,6 +137,12 @@ func TestRuleEvaluator_ProcessName(t *testing.T) {
 		t.Fatalf("expected Slack match, got %+v", res3)
 	}
 
+	// Short prefix like "c" should NOT falsely match "curl"
+	resShort := eval.Evaluate("example.com", "c", 0, "")
+	if resShort.Matched {
+		t.Fatalf("single letter process 'c' must not match 'curl', got %+v", resShort)
+	}
+
 	// Empty process name does not match
 	res4 := eval.Evaluate("example.com", "", 0, "")
 	if res4.Matched {
@@ -170,6 +176,14 @@ func TestRuleEvaluator_GeositeAndRuleSet(t *testing.T) {
 	resApple := eval.Evaluate("api.apple.com", "", 0, "")
 	if !resApple.Matched || resApple.Outbound != "proxy" {
 		t.Fatalf("expected apple geosite match, got %+v", resApple)
+	}
+
+	// Short country codes must not falsely match substrings (e.g. asus.com matching us)
+	rulesUS := []state.Rule{{ID: "us", Match: "GEOSITE", Value: "geosite-us", Action: "proxy"}}
+	evalUS := NewRuleEvaluator(rulesUS)
+	resAsus := evalUS.Evaluate("asus.com", "", 0, "")
+	if resAsus.Matched {
+		t.Fatalf("asus.com must not match geosite-us, got %+v", resAsus)
 	}
 }
 

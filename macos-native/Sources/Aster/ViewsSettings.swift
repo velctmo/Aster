@@ -4,9 +4,7 @@ import AppKit
 
 public struct SettingsView: View {
     @ObservedObject var state = AsterState.shared
-    @AppStorage("showNodeBandwidthBadge") private var showNodeBandwidthBadge: Bool = true
     @AppStorage("sortNodesByDelay") private var sortNodesByDelay: Bool = false
-    @AppStorage("showConnectionQuickRule") private var showConnectionQuickRule: Bool = true
     @AppStorage("minimizeOnLaunch") private var minimizeOnLaunch: Bool = false
     @AppStorage("showStatusBarSpeed") private var showStatusBarSpeed: Bool = true
     @AppStorage("keepDockWhenWindowClosed") private var keepDockWhenWindowClosed: Bool = false
@@ -35,6 +33,13 @@ public struct SettingsView: View {
     @State private var isBackingUpWebDAV: Bool = false
     @State private var isRestoringWebDAV: Bool = false
     @State private var isClearingProxy: Bool = false
+
+    // 精致就地状态反馈指示 (InlineStatusPill)
+    @State private var portStatus: InlineStatusKind? = nil
+    @State private var probeStatus: InlineStatusKind? = nil
+    @State private var webdavStatus: InlineStatusKind? = nil
+    @State private var icloudStatus: InlineStatusKind? = nil
+    @State private var clearProxyStatus: InlineStatusKind? = nil
 
     // 确认弹窗
     @State private var showConfirmICloudRestore: Bool = false
@@ -140,13 +145,14 @@ public struct SettingsView: View {
         ) {
             Button("立即恢复 (覆盖本地配置)", role: .destructive) {
                 isRestoringICloud = true
+                icloudStatus = .loading("正在从 iCloud Drive 恢复…")
                 Task {
                     defer { isRestoringICloud = false }
                     do {
                         try await state.importFromICloud()
+                        icloudStatus = .success("已成功从 iCloud Drive 恢复配置")
                     } catch {
-                        state.actionError = error.localizedDescription
-                        state.notify(message: "恢复失败：\(error.localizedDescription)", type: .error)
+                        icloudStatus = .error("恢复失败：\(error.localizedDescription)")
                     }
                 }
             }
@@ -237,7 +243,41 @@ public struct SettingsView: View {
     private var networkTabContent: some View {
         let importedProfile = state.status.activeConfigKind == "subscription"
         return VStack(alignment: .leading, spacing: 18) {
-            // 卡片 1: 端口自定义与监听
+            // 卡片 1: 全局网络接管与代理捕获 (实时生效)
+            VStack(alignment: .leading, spacing: 10) {
+                Label("网络接管与代理捕获", systemImage: "network.badge.shield.half.filled")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.primary)
+
+                VStack(spacing: 12) {
+                    settingSwitchRow(
+                        title: "系统代理 (System Proxy)",
+                        subtitle: "自动配置 macOS 系统网络偏好设置中的 HTTP、HTTPS 与 SOCKS 代理接入",
+                        isOn: Binding(
+                            get: { state.status.capture.systemProxy },
+                            set: { state.setCapture(systemProxy: $0, tun: state.status.capture.tun) }
+                        ),
+                        isEnabled: state.status.capabilities?.systemProxy.available ?? true,
+                        disabledReason: state.status.capabilities?.systemProxy.reason
+                    )
+
+                    Divider()
+
+                    settingSwitchRow(
+                        title: "虚拟网卡 (TUN 模式)",
+                        subtitle: "创建独立虚拟网卡设备，全量接管 TCP/UDP 流量（包括无代理设置的终端与应用）",
+                        isOn: Binding(
+                            get: { state.status.capture.tun },
+                            set: { state.setCapture(systemProxy: state.status.capture.systemProxy, tun: $0) }
+                        ),
+                        isEnabled: (state.status.capabilities?.tun.available ?? true) && !state.status.needAdmin,
+                        disabledReason: state.status.needAdmin ? "需要 Helper 特权辅助组件授权" : state.status.capabilities?.tun.reason
+                    )
+                }
+                .settingsCardStyle()
+            }
+
+            // 卡片 2: 端口自定义与监听
             VStack(alignment: .leading, spacing: 10) {
                 Label("核心监听端口自定义", systemImage: "slider.horizontal.3")
                     .font(.system(size: 13, weight: .bold))
@@ -262,11 +302,14 @@ public struct SettingsView: View {
 
                     Divider()
 
-                    HStack {
-                        Text("修改端口将自动热重载 Sing-box 内核")
+                    HStack(spacing: 8) {
+                        Text("修改端口将自动热重载 sing-box 内核")
                             .font(.system(size: 10.5))
                             .foregroundColor(.secondary)
                         Spacer()
+                        if let portStatus {
+                            InlineStatusPill(kind: portStatus, onDismiss: { self.portStatus = nil })
+                        }
                         Button(action: saveCustomPorts) {
                             HStack(spacing: 4) {
                                 if isSavingPorts {
@@ -277,8 +320,7 @@ public struct SettingsView: View {
                                 Text("保存并重载端口")
                             }
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
+                        .buttonStyle(.exquisitePrimary(height: 28, cornerRadius: AsterMetrics.radiusControl))
                         .disabled(isSavingPorts)
                     }
                 }
@@ -345,20 +387,21 @@ public struct SettingsView: View {
 
     private func saveCustomPorts() {
         guard let mixed = Int(mixedPortInput.trimmingCharacters(in: .whitespaces)) else {
-            state.notify(message: "端口必须为纯数字", type: .error)
+            portStatus = .error("端口必须为纯数字")
             return
         }
         guard (1024...65535).contains(mixed) else {
-            state.notify(message: "端口范围必须在 1024 ~ 65535 之间", type: .error)
+            portStatus = .error("端口范围必须在 1024 ~ 65535 之间")
             return
         }
         isSavingPorts = true
+        portStatus = .loading("正在更新端口…")
         state.patchSettings(body: [
             "mixedPort": mixed
         ])
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             self.isSavingPorts = false
-            self.state.notify(message: "端口配置已更新，内核已热重载", type: .success)
+            self.portStatus = .success("端口已更新并生效 (\(mixed))")
         }
     }
 
@@ -414,9 +457,13 @@ public struct SettingsView: View {
                                 guard !trimmed.isEmpty else { return }
                                 updateProbe(trimmed, success: "已成功更新自定义测速靶点")
                             }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
+                            .buttonStyle(.exquisitePrimary(height: 28))
                         }
+                    }
+
+                    if let probeStatus {
+                        InlineStatusPill(kind: probeStatus, onDismiss: { self.probeStatus = nil })
+                            .padding(.vertical, 2)
                     }
 
                     Divider()
@@ -475,51 +522,127 @@ public struct SettingsView: View {
         VStack(alignment: .leading, spacing: 18) {
             // 板块 1: 本地便携配置文件导入与导出
             VStack(alignment: .leading, spacing: 10) {
-                Label("本地文件备份与还原", systemImage: "internaldrive")
+                Label("本地配置备份与还原", systemImage: "internaldrive.fill")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundColor(.primary)
 
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("将订阅、自定义节点、覆写脚本、分流规则及应用偏好打包为 Zip。不会导出本机端口、权限、内核路径、API 身份或运行记录；恢复成功后 Aster 自动重新启动。")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                HStack(spacing: 12) {
+                    // 导出卡片
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 10) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color.accentColor.opacity(0.12))
+                                    .frame(width: 34, height: 34)
+                                Image(systemName: "square.and.arrow.up.fill")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundColor(.accentColor)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("导出本地备份")
+                                    .font(.system(size: 12.5, weight: .semibold))
+                                    .foregroundColor(.primary)
+                                Text("归档打包为 .zip 文件")
+                                    .font(.system(size: 10.5))
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                        }
 
-                    HStack(spacing: 12) {
+                        Text("打包全部订阅源、聚合节点、覆写脚本、分流规则及应用偏好。安全脱敏，不含本机敏感网络端口与密钥凭据。")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary.opacity(0.9))
+                            .lineSpacing(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Spacer(minLength: 4)
+
                         Button(action: {
                             Task {
                                 do {
                                     try await state.exportLocalBackup()
-                                    state.notify(message: "已成功导出本地备份归档", type: .success)
                                 } catch {
-                                    state.notify(message: "导出失败: \(error.localizedDescription)", type: .error)
+                                    let alert = NSAlert()
+                                    alert.messageText = "导出本地备份失败"
+                                    alert.informativeText = error.localizedDescription
+                                    alert.alertStyle = .warning
+                                    alert.runModal()
                                 }
                             }
                         }) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "square.and.arrow.up")
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.up.doc.fill")
+                                    .font(.system(size: 11))
                                 Text("导出本地备份包…")
                             }
+                            .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .buttonStyle(.exquisitePrimary(height: 28, cornerRadius: AsterMetrics.radiusControl))
+                    }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, minHeight: 150)
+                    .background(
+                        RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
+                            .fill(Color.primary.opacity(0.025))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
+                            .stroke(Color.primary.opacity(0.06), lineWidth: 0.8)
+                    )
+
+                    // 卡片 2: 恢复历史备份
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Image(systemName: "arrow.counterclockwise.circle.fill")
+                                .foregroundColor(.teal)
+                                .font(.system(size: 14))
+                            Text("本地归档恢复")
+                                .font(.system(size: 13, weight: .semibold))
+                            Spacer()
+                        }
+
+                        Text("选取历史导出的 Aster 本地备份文件进行全量还原。配置载入完成后，核心进程将无缝平滑重载生效。")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary.opacity(0.9))
+                            .lineSpacing(2)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Spacer(minLength: 4)
 
                         Button(action: {
                             Task {
                                 do {
                                     try await state.importLocalBackup()
                                 } catch {
-                                    state.notify(message: "还原失败: \(error.localizedDescription)", type: .error)
+                                    let alert = NSAlert()
+                                    alert.messageText = "还原本地备份失败"
+                                    alert.informativeText = error.localizedDescription
+                                    alert.alertStyle = .warning
+                                    alert.runModal()
                                 }
                             }
                         }) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "square.and.arrow.down")
+                            HStack(spacing: 6) {
+                                Image(systemName: "arrow.down.doc.fill")
+                                    .font(.system(size: 11))
                                 Text("导入本地备份…")
                             }
+                            .frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .buttonStyle(.exquisiteSecondary(height: 28, cornerRadius: AsterMetrics.radiusControl))
                     }
+                    .padding(14)
+                    .frame(maxWidth: .infinity, minHeight: 150)
+                    .background(
+                        RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
+                            .fill(Color.primary.opacity(0.025))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
+                            .stroke(Color.primary.opacity(0.06), lineWidth: 0.8)
+                    )
                 }
                 .settingsCardStyle()
             }
@@ -544,14 +667,14 @@ public struct SettingsView: View {
                     HStack(spacing: 12) {
                         Button(action: {
                             isBackingUpICloud = true
+                            icloudStatus = .loading("正在备份至 iCloud Drive…")
                             Task {
                                 defer { isBackingUpICloud = false }
                                 do {
                                     try await state.exportToICloud()
-                                    state.notify(message: "已成功将当前配置备份至 iCloud Drive", type: .success)
+                                    icloudStatus = .success("已成功备份至 iCloud Drive")
                                 } catch {
-                                    state.actionError = error.localizedDescription
-                                    state.notify(message: "备份失败：\(error.localizedDescription)", type: .error)
+                                    icloudStatus = .error("备份失败：\(error.localizedDescription)")
                                 }
                             }
                         }) {
@@ -564,8 +687,7 @@ public struct SettingsView: View {
                                 Text("立即备份至 iCloud")
                             }
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .buttonStyle(.exquisitePrimary(height: 28, cornerRadius: AsterMetrics.radiusControl))
                         .disabled(isBackingUpICloud || isRestoringICloud)
 
                         Button(action: {
@@ -580,9 +702,16 @@ public struct SettingsView: View {
                                 Text("从 iCloud 恢复配置")
                             }
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .buttonStyle(.exquisiteSecondary(height: 28, cornerRadius: AsterMetrics.radiusControl))
                         .disabled(!state.iCloudStatus.hasBackup || isBackingUpICloud || isRestoringICloud)
+                    }
+
+                    if let icloudStatus {
+                        HStack {
+                            InlineStatusPill(kind: icloudStatus, onDismiss: { self.icloudStatus = nil })
+                            Spacer()
+                        }
+                        .padding(.top, 4)
                     }
                 }
                 .settingsCardStyle()
@@ -658,8 +787,7 @@ public struct SettingsView: View {
                                 Text("测试连接")
                             }
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .buttonStyle(.exquisiteSecondary(height: 28, cornerRadius: AsterMetrics.radiusControl))
                         .disabled(webdavServerURL.isEmpty || isTestingWebDAV)
 
                         Spacer()
@@ -674,8 +802,7 @@ public struct SettingsView: View {
                                 Text("备份至 WebDAV")
                             }
                         }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
+                        .buttonStyle(.exquisitePrimary(height: 28, cornerRadius: AsterMetrics.radiusControl))
                         .disabled(webdavServerURL.isEmpty || isBackingUpWebDAV || isRestoringWebDAV)
 
                         Button(action: {
@@ -690,9 +817,16 @@ public struct SettingsView: View {
                                 Text("从 WebDAV 恢复")
                             }
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .buttonStyle(.exquisiteSecondary(height: 28, cornerRadius: AsterMetrics.radiusControl))
                         .disabled(webdavServerURL.isEmpty || isBackingUpWebDAV || isRestoringWebDAV)
+                    }
+
+                    if let webdavStatus {
+                        HStack {
+                            InlineStatusPill(kind: webdavStatus, onDismiss: { self.webdavStatus = nil })
+                            Spacer()
+                        }
+                        .padding(.top, 4)
                     }
 
                     if webdavLastBackupAt > 0 {
@@ -746,39 +880,43 @@ public struct SettingsView: View {
 
     private func testWebDAV() {
         isTestingWebDAV = true
+        webdavStatus = .loading("正在测试 WebDAV 连通性…")
         Task {
             defer { isTestingWebDAV = false }
             do {
                 try await state.testWebDAVConnection(config: makeWebDAVConfig())
-                state.notify(message: "WebDAV 连通性测试成功", type: .success)
+                webdavStatus = .success("WebDAV 连通性测试通过")
             } catch {
-                state.notify(message: error.localizedDescription, type: .error)
+                webdavStatus = .error("连接失败：\(error.localizedDescription)")
             }
         }
     }
 
     private func backupToWebDAV() {
         isBackingUpWebDAV = true
+        webdavStatus = .loading("正在上传备份至 WebDAV…")
         Task {
             defer { isBackingUpWebDAV = false }
             do {
                 try await state.exportToWebDAV(config: makeWebDAVConfig())
                 webdavLastBackupAt = Date().timeIntervalSince1970
-                state.notify(message: "已成功上传备份至 WebDAV", type: .success)
+                webdavStatus = .success("已成功备份至 WebDAV")
             } catch {
-                state.notify(message: "备份失败: \(error.localizedDescription)", type: .error)
+                webdavStatus = .error("备份失败：\(error.localizedDescription)")
             }
         }
     }
 
     private func restoreFromWebDAV() {
         isRestoringWebDAV = true
+        webdavStatus = .loading("正在从 WebDAV 恢复…")
         Task {
             defer { isRestoringWebDAV = false }
             do {
                 try await state.importFromWebDAV(config: makeWebDAVConfig())
+                webdavStatus = .success("已成功从 WebDAV 恢复配置")
             } catch {
-                state.notify(message: "恢复失败: \(error.localizedDescription)", type: .error)
+                webdavStatus = .error("恢复失败：\(error.localizedDescription)")
             }
         }
     }
@@ -808,14 +946,14 @@ public struct SettingsView: View {
                 VStack(spacing: 12) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("Sing-box 官方内核")
+                            Text("sing-box 官方内核")
                                 .font(.system(size: 12.5, weight: .semibold))
                             Text("原生高性能网络代理核心与出站分流引擎")
                                 .font(.system(size: 11))
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
-                        Text(state.status.coreVersion.isEmpty ? "Sing-box 原生内核" : state.status.coreVersion)
+                        Text(state.status.coreVersion.isEmpty ? "sing-box 原生内核" : state.status.coreVersion)
                             .font(.system(size: 11, design: .monospaced))
                             .foregroundColor(.secondary)
                     }
@@ -829,26 +967,48 @@ public struct SettingsView: View {
                     .font(.system(size: 13, weight: .bold))
                     .foregroundColor(.primary)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("导出核心运行状态、配置结构元数据及网络三级链路延时，不包含任何订阅 URL、节点密码或敏感凭据。")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                HStack(alignment: .center, spacing: 14) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color.orange.opacity(0.12))
+                            .frame(width: 36, height: 36)
+                        Image(systemName: "shield.lefthalf.filled")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundColor(.orange)
+                    }
 
-                    HStack {
-                        Spacer()
-                        Button("导出脱敏诊断报告…") {
-                            Task {
-                                do {
-                                    try await state.exportDiagnosticsReport()
-                                    state.notify(message: "已导出脱敏诊断报告", type: .success)
-                                } catch {
-                                    state.notify(message: "导出失败：\(error.localizedDescription)", type: .error)
-                                }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("脱敏系统诊断归档 (.json)")
+                            .font(.system(size: 12.5, weight: .semibold))
+                            .foregroundColor(.primary)
+                        Text("导出核心运行状态、配置结构元数据及网络三级链路延时。所有订阅 URL、节点密码及私密凭据均已物理脱敏。")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+
+                    Spacer(minLength: 12)
+
+                    Button {
+                        Task {
+                            do {
+                                try await state.exportDiagnosticsReport()
+                            } catch {
+                                let alert = NSAlert()
+                                alert.messageText = "导出诊断报告失败"
+                                alert.informativeText = error.localizedDescription
+                                alert.alertStyle = .warning
+                                alert.runModal()
                             }
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "doc.badge.gearshape")
+                                .font(.system(size: 11))
+                            Text("导出脱敏报告…")
+                        }
                     }
+                    .buttonStyle(.exquisiteSecondary(height: 28, cornerRadius: AsterMetrics.radiusControl))
                 }
                 .settingsCardStyle()
             }
@@ -864,17 +1024,21 @@ public struct SettingsView: View {
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
 
-                    HStack {
+                    HStack(spacing: 8) {
+                        if let clearProxyStatus {
+                            InlineStatusPill(kind: clearProxyStatus, onDismiss: { self.clearProxyStatus = nil })
+                        }
                         Spacer()
                         Button(action: {
                             isClearingProxy = true
+                            clearProxyStatus = .loading("正在清理系统代理残留…")
                             Task {
                                 defer { isClearingProxy = false }
                                 do {
                                     try await state.clearSystemProxyResidue()
-                                    state.notify(message: "已成功清理系统代理残留设置", type: .success)
+                                    clearProxyStatus = .success("系统代理残留已成功清除")
                                 } catch {
-                                    state.notify(message: "清理失败: \(error.localizedDescription)", type: .error)
+                                    clearProxyStatus = .error("清理失败：\(error.localizedDescription)")
                                 }
                             }
                         }) {
@@ -887,8 +1051,7 @@ public struct SettingsView: View {
                                 Text("一键重置系统代理残留")
                             }
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                        .buttonStyle(.exquisiteSecondary(height: 28, cornerRadius: AsterMetrics.radiusControl))
                         .disabled(isClearingProxy)
                     }
                 }
@@ -898,13 +1061,13 @@ public struct SettingsView: View {
     }
 
     private func updateProbe(_ url: String, success: String) {
+        probeStatus = .loading("正在更新测速探针…")
         Task {
             do {
                 try await state.updateDelayURL(url)
-                state.notify(message: success, type: .success)
+                probeStatus = .success(success)
             } catch {
-                state.actionError = error.localizedDescription
-                state.notify(message: "更新失败：\(error.localizedDescription)", type: .error)
+                probeStatus = .error("更新失败：\(error.localizedDescription)")
             }
         }
     }
@@ -938,10 +1101,9 @@ private extension View {
     func settingsCardStyle() -> some View {
         self.padding(14)
             .background(
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
                     .fill(.ultraThinMaterial)
             )
-            .liquidGlassBorder(cornerRadius: 12)
-            .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
+            .nativeHairlineBorder(cornerRadius: AsterMetrics.radiusCard)
     }
 }

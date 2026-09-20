@@ -61,25 +61,30 @@ echo "  [2/5] 编译 Aster SwiftUI 客户端..."
 # the Swift interfaces but not the SwiftUIMacros plugin, so a bare swiftc
 # fallback produces a misleading wall of macro errors instead of an app.
 if ! command -v xcodebuild >/dev/null 2>&1 || ! xcodebuild -version >/dev/null 2>&1; then
-  echo "错误: 构建 Aster.app 需要完整 Xcode 15+（当前仅安装 Command Line Tools）。" >&2
-  echo "请安装 Xcode 后执行: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer" >&2
-  exit 1
+  if [[ -f "bin/Aster" && -x "bin/Aster" ]]; then
+    echo "  ⚠️ 未找到完整 Xcode (xcodebuild)，检测到 bin/Aster 存在，复用现有二进制打包..."
+  else
+    echo "错误: 构建 Aster.app 需要完整 Xcode 15+（当前仅安装 Command Line Tools）。" >&2
+    echo "请安装 Xcode 后执行: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer" >&2
+    exit 1
+  fi
+else
+  XCODE_LOG="build/xcodebuild.log"
+  if ! xcodebuild -project macos-native/Aster.xcodeproj -scheme Aster -configuration Release \
+    -destination 'platform=macOS,arch=arm64' \
+    -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO build >"$XCODE_LOG" 2>&1; then
+    echo "错误: xcodebuild 编译失败。日志末尾：" >&2
+    tail -n 80 "$XCODE_LOG" >&2 || true
+    exit 1
+  fi
+  BUILT_APP=$(find build/DerivedData -name 'Aster.app' -type d | head -1 || true)
+  if [[ -z "${BUILT_APP:-}" ]]; then
+    echo "错误: xcodebuild 成功但未找到 Aster.app。" >&2
+    exit 1
+  fi
+  cp "$BUILT_APP/Contents/MacOS/Aster" bin/Aster
+  chmod +x bin/Aster
 fi
-XCODE_LOG="build/xcodebuild.log"
-if ! xcodebuild -project macos-native/Aster.xcodeproj -scheme Aster -configuration Release \
-  -destination 'platform=macOS,arch=arm64' \
-  -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO build >"$XCODE_LOG" 2>&1; then
-  echo "错误: xcodebuild 编译失败。日志末尾：" >&2
-  tail -n 80 "$XCODE_LOG" >&2 || true
-  exit 1
-fi
-BUILT_APP=$(find build/DerivedData -name 'Aster.app' -type d | head -1 || true)
-if [[ -z "${BUILT_APP:-}" ]]; then
-  echo "错误: xcodebuild 成功但未找到 Aster.app。" >&2
-  exit 1
-fi
-cp "$BUILT_APP/Contents/MacOS/Aster" bin/Aster
-chmod +x bin/Aster
 
 ensure_singbox() {
   local dest="vendor/cores/sing-box-${SING_BOX_VERSION}-darwin-${SB_ARCH}"

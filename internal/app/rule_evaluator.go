@@ -3,6 +3,7 @@ package app
 import (
 	"net"
 	"net/netip"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -60,9 +61,10 @@ func (e *RuleEvaluator) Evaluate(target string, process string, port int, networ
 		switch matchType {
 		case "PROCESS-NAME", "PROCESS":
 			if processClean != "" {
+				baseLower := strings.ToLower(filepath.Base(processClean))
 				if strings.EqualFold(ruleVal, processClean) ||
-					strings.Contains(processLower, ruleValLower) ||
-					strings.Contains(ruleValLower, processLower) {
+					baseLower == ruleValLower ||
+					strings.Contains(processLower, ruleValLower) {
 					matched = true
 				}
 			}
@@ -177,8 +179,15 @@ func matchGeositeOrRuleSet(targetLower, ruleValLower string) bool {
 				return true
 			}
 		}
+	case "openai":
+		return strings.Contains(targetLower, "openai") || strings.Contains(targetLower, "chatgpt")
+	case "netflix":
+		return strings.Contains(targetLower, "netflix") || strings.Contains(targetLower, "nflxvideo")
+	case "github":
+		return strings.Contains(targetLower, "github") || strings.Contains(targetLower, "ghcr.io")
 	default:
-		if key != "" && strings.Contains(targetLower, key) {
+		// 严禁对短国家代码（如 us, hk, jp, tw）或短字符串进行粗暴子串匹配（避免 asus.com 误判为 geosite-us）
+		if len(key) >= 4 && strings.Contains(targetLower, key) {
 			return true
 		}
 	}
@@ -192,12 +201,17 @@ func (a *App) EvaluateRule(target string, process string, port int, network stri
 		return res, nil
 	}
 
+	if a.core.Running() {
+		if proxies, err := a.clash.Proxies(); err == nil && proxies != nil {
+			if p, ok := proxies[res.Outbound]; ok && p.Now != "" {
+				res.SelectedNode = p.Now
+				return res, nil
+			}
+		}
+	}
+
 	st := a.st.Get()
-	if st.SelectorNow != nil && st.SelectorNow[res.Outbound] != "" {
-		res.SelectedNode = st.SelectorNow[res.Outbound]
-	} else if strings.EqualFold(res.Outbound, "proxy") && st.Selected != "" {
-		res.SelectedNode = st.Selected
-	} else if saved := selectorSaved(st, res.Outbound); saved != "" {
+	if saved := selectorSaved(st, res.Outbound); saved != "" {
 		res.SelectedNode = saved
 	} else {
 		res.SelectedNode = res.Outbound

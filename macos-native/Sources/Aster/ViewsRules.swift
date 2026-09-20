@@ -6,7 +6,7 @@ public struct UnifiedRuleTableRow: Identifiable, Hashable {
     public let id: String
     public let matchType: String   // 全大写匹配类型: DOMAIN-SUFFIX, IP-CIDR, RULE-SET, etc.
     public let payload: String     // 规则内容 / 目标域名 / CIDR (保留特定大小写)
-    public let action: String      // 执行动作 / 策略组: PROXY, DIRECT, REJECT, 🔍 GOOGLE, etc.
+    public let action: String      // 执行动作 / 策略组: PROXY, DIRECT, REJECT, GOOGLE, etc.
     public let source: String      // 来源: USER (手动添加), SCRIPT (覆写脚本), SYSTEM (内置默认)
     public let hits: Int           // 命中统计
     public var isSystem: Bool { source == "SYSTEM" }
@@ -54,32 +54,29 @@ public struct RulesView: View {
 
     // 内置系统高优先级默认规则
     private var builtInSystemRules: [UnifiedRuleTableRow] {
-        [
+        var list: [UnifiedRuleTableRow] = [
             UnifiedRuleTableRow(
-                id: "system-ads-1",
-                matchType: "RULE-SET",
-                payload: "geosite-category-ads-all (广告拦截)",
-                action: "REJECT",
-                source: "SYSTEM",
-                hits: 0
-            ),
-            UnifiedRuleTableRow(
-                id: "system-private-2",
+                id: "system-private-1",
                 matchType: "IP-IS-PRIVATE",
                 payload: "局域网私有 IP (LAN 直连)",
                 action: "DIRECT",
                 source: "SYSTEM",
                 hits: 0
-            ),
-            UnifiedRuleTableRow(
-                id: "system-cn-3",
-                matchType: "RULE-SET",
-                payload: "geosite-cn / geoip-cn (中国大陆直连)",
-                action: "DIRECT",
-                source: "SYSTEM",
-                hits: 0
             )
         ]
+        if state.directCN {
+            list.append(
+                UnifiedRuleTableRow(
+                    id: "system-cn-2",
+                    matchType: "RULE-SET",
+                    payload: "geosite-cn / geoip-cn (中国大陆直连)",
+                    action: "DIRECT",
+                    source: "SYSTEM",
+                    hits: 0
+                )
+            )
+        }
+        return list
     }
 
     // 动态规则转换 (包含用户手动自建与覆写脚本动态注入的规则)
@@ -180,35 +177,7 @@ public struct RulesView: View {
             // 搜索与过滤工具栏
             HStack(spacing: 12) {
                 // 搜索框
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-
-                    TextField("搜索类型、域名、IP 或策略…", text: $searchText)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12))
-
-                    if !searchText.isEmpty {
-                        Button {
-                            searchText = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("清空规则搜索")
-                    }
-                }
-                .padding(.horizontal, 10)
-                .frame(height: 28)
-                .background(Color.primary.opacity(0.04))
-                .clipShape(.rect(cornerRadius: 7))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7)
-                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.8)
-                )
+                ExquisiteSearchField(placeholder: "搜索类型、域名、IP 或策略…", text: $searchText)
 
                 Picker("过滤", selection: $selectedFilter) {
                     ForEach(RuleFilter.allCases) { filter in
@@ -278,20 +247,24 @@ public struct RulesView: View {
                         let (labelText, bgCol, textCol): (String, Color, Color) = {
                             switch rule.source {
                             case "SCRIPT":
-                                return ("[脚本]", Color.purple.opacity(0.12), Color.purple)
+                                return ("脚本", Color.purple.opacity(0.12), Color.purple)
                             case "USER":
-                                return ("[用户]", Color.blue.opacity(0.12), Color.blue)
+                                return ("用户", Color.blue.opacity(0.12), Color.blue)
                             default:
-                                return ("[内置]", Color.primary.opacity(0.05), Color.secondary)
+                                return ("内置", Color.primary.opacity(0.05), Color.secondary)
                             }
                         }()
                         Text(labelText)
-                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(textCol)
-                            .padding(.horizontal, 5)
+                            .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(bgCol)
-                            .clipShape(.rect(cornerRadius: 3.5))
+                            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .strokeBorder(textCol.opacity(0.25), lineWidth: 0.5)
+                            )
                     }
                     .width(min: 55, ideal: 65, max: 80)
 

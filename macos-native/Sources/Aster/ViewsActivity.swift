@@ -5,47 +5,28 @@ import AppKit
 public struct ActivityDashboardView: View {
     @ObservedObject var state = AsterState.shared
     @State private var showExternalIPPopover = false
-    @State private var timelineFilter: String = "all" // "all" | "down" | "up"
     @State private var isDiagnosing = false
     @State private var connectionFilter: String = "all" // "all" | "proxy" | "direct"
-    @State private var connectionSearchText: String = ""
-    @State private var topContentHeight: CGFloat = 340
     @State private var selectedConnection: ConnectionItem? = nil
     @State private var showRuleEvaluator: Bool = false
+    @State private var showCloseAllAlert: Bool = false
+
+    public init() {}
 
     public var body: some View {
-        VStack(spacing: 0) {
-            // PageHeader 钉住不滚 (移除顶栏冗余日志按钮)
+        VStack(spacing: 12) {
+            // 顶栏：沉稳专业页面标题 (无冗余侵入性横幅)
             activityHeaderView
 
-            GeometryReader { geo in
-                VStack(spacing: 12) {
-                    // PrimaryZone: 四列元数据横栏 + 核心便当网格
-                    VStack(spacing: 12) {
-                        fourColumnMetadataBar
-                        bentoGridView
-                    }
-                    .background(
-                        GeometryReader { topGeo in
-                            Color.clear.preference(key: TopContentHeightKey.self, value: topGeo.size.height)
-                        }
-                    )
+            // Zone 1: 精炼全景指标舱 (HUD, 高度收敛至 ~76pt，释放 75%+ 垂直主空间)
+            activityOverviewHUD
+                .padding(.horizontal, DesignTokens.pagePadding)
 
-                    // SecondaryZone: 实时连接区域 (动态自适应填满剩余垂直高度，单屏尽览零滚动条)
-                    let availableHeight = max(geo.size.height - topContentHeight - 16, 120)
-                    liveConnectionsStreamSection(availableHeight: availableHeight)
-                }
-                .onPreferenceChange(TopContentHeightKey.self) { newH in
-                    Task { @MainActor in
-                        if newH > 50 && abs(topContentHeight - newH) > 1 {
-                            topContentHeight = newH
-                        }
-                    }
-                }
+            // Zone 2: 实时连接流主舞台 (全尺寸纵向平滑滚动，杜绝 8 行硬截断)
+            liveConnectionsStreamSection
                 .padding(.horizontal, DesignTokens.pagePadding)
                 .padding(.bottom, 12)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .onExitCommand {
             if selectedConnection != nil {
@@ -72,134 +53,127 @@ public struct ActivityDashboardView: View {
             }
             state.fetchIPInfo()
         }
+        .alert("断开全部活跃连接", isPresented: $showCloseAllAlert) {
+            Button("取消", role: .cancel) {}
+            Button("断开全部", role: .destructive) {
+                state.closeAllConnections()
+            }
+        } message: {
+            Text("确定要强制关闭当前所有正在进行的 TCP/UDP 活跃连接吗？此操作将立即释放全部出站套接字。")
+        }
     }
 
-    // A. 顶部状态栏。仅保留必要错误告警，去除顶栏多余日志按钮
+    // A. 顶部状态栏
     private var activityHeaderView: some View {
         PageHeader(title: "活动") {
-            if state.status.tunFailed || !state.status.error.isEmpty {
-                HStack(spacing: 4) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11))
-                    Text(state.status.error.isEmpty ? "虚拟网卡启动异常" : state.status.error)
-                        .font(.system(size: 11, weight: .medium))
-                        .lineLimit(1)
+            Button(action: {
+                InspectorWindowController.shared.show()
+            }) {
+                HStack(spacing: 5) {
+                    Image(systemName: "macwindow.on.rectangle")
+                    Text("独立日志窗口")
                 }
-                .foregroundStyle(.orange)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(Color.orange.opacity(0.12))
-                .clipShape(.rect(cornerRadius: 6))
             }
+            .buttonStyle(.exquisiteSecondary(height: 28, cornerRadius: AsterMetrics.radiusControl))
+            .help("在独立的悬浮窗口中打开网络请求日志审查")
         }
     }
 
-    // B. 四列关键网络元数据横栏（窄宽 2×2）
-    private var fourColumnMetadataBar: some View {
-        ViewThatFits(in: .horizontal) {
-            metadataRow(columns: 4)
-            metadataRow(columns: 2)
+    // B. 精炼全景指标舱 (Zone 1: 四列指标均匀对称分布，高度收敛)
+    private var activityOverviewHUD: some View {
+        HStack(spacing: 14) {
+            // Col 1: 接入网络与出口模式
+            hudNetworkCol
+
+            Divider().opacity(0.25).frame(height: 48)
+
+            // Col 2: 真实网络延迟 (真实物理测量，绝无假数据)
+            hudLatencyCol
+
+            Divider().opacity(0.25).frame(height: 48)
+
+            // Col 3: 实时速率与吞吐
+            hudThroughputCol
+
+            Divider().opacity(0.25).frame(height: 48)
+
+            // Col 4: 活跃连接监控大盘
+            hudConnectionsCol
         }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
+        .activityCardStyle()
     }
 
-    private func metadataRow(columns: Int) -> some View {
-        let items: [(String, AnyView)] = [
-            ("网络", AnyView(
-                HStack(spacing: 6) {
-                    Image(systemName: state.diagnostics.networkType.contains("Wi-Fi") ? "wifi" : "cable.connector")
-                        .font(.system(size: 13))
-                    Text(state.diagnostics.networkType.isEmpty ? "以太网" : state.diagnostics.networkType)
-                        .font(.system(size: 13, weight: .bold))
-                        .lineLimit(1)
-                }
-            )),
-            ("配置", AnyView(
-                HStack(spacing: 6) {
-                    Image(systemName: "doc.text.fill")
-                        .font(.system(size: 12))
-                        .foregroundColor(.blue)
-                    Text(state.diagnostics.configName.isEmpty ? "默认配置" : state.diagnostics.configName)
-                        .font(.system(size: 13, weight: .bold))
-                        .lineLimit(1)
-                }
-            )),
-            ("出站模式", AnyView(
-                Text(currentModeDisplayName)
+    // Col 1: 网络与当前生效模式
+    private var hudNetworkCol: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 6) {
+                let netType = state.diagnostics.networkType.isEmpty ? "网络就绪" : state.diagnostics.networkType
+                let iconName: String = {
+                    if netType.contains("Wi-Fi") { return "wifi" }
+                    if netType == "未连接网络" { return "wifi.slash" }
+                    if netType == "蜂窝网络" { return "antenna.radiowaves.left.and.right" }
+                    return "cable.connector"
+                }()
+                Image(systemName: iconName)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                Text(netType)
                     .font(.system(size: 13, weight: .bold))
-                    .foregroundStyle(.primary)
-                    .accessibilityLabel("当前出站模式：\(currentModeDisplayName)")
-            )),
-            ("外部 IP", AnyView(
+                    .lineLimit(1)
+
+                Spacer(minLength: 4)
+
+                Text(currentModeBadge)
+                    .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1.5)
+                    .background(Color.accentColor.opacity(0.12))
+                    .clipShape(Capsule())
+            }
+
+            HStack(spacing: 6) {
+                let activeName = (state.status.activeConfigName?.isEmpty == false) ? state.status.activeConfigName! : (!state.diagnostics.configName.isEmpty ? state.diagnostics.configName : "未激活配置")
+                Text(activeName)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+
+                Spacer(minLength: 4)
+
                 Button(action: { showExternalIPPopover.toggle() }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "globe.asia.australia.fill")
-                            .font(.system(size: 12))
-                            .foregroundColor(.orange)
+                    HStack(spacing: 3) {
+                        Image(systemName: "globe")
+                            .font(.system(size: 9.5))
                         Text(displayExternalIP)
-                            .font(.system(size: 13, weight: .bold, design: .monospaced))
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
                             .lineLimit(1)
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(.secondary)
                     }
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
+                    .background(Color.primary.opacity(0.04))
+                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                 }
                 .buttonStyle(.plain)
                 .popover(isPresented: $showExternalIPPopover, arrowEdge: .bottom) {
                     DualIPDetailPopoverView()
                         .frame(width: 360, height: 260)
                 }
-            )),
-        ]
-
-        return Group {
-            if columns == 4 {
-                HStack(spacing: 0) {
-                    ForEach(0..<4, id: \.self) { i in
-                        if i > 0 { Divider().frame(height: 32).opacity(0.3) }
-                        metaCell(title: items[i].0, content: items[i].1)
-                    }
-                }
-                .padding(.vertical, 12)
-                .frame(maxWidth: .infinity)
-                .activityCardStyle()
-            } else {
-                VStack(spacing: 0) {
-                    HStack(spacing: 0) {
-                        metaCell(title: items[0].0, content: items[0].1)
-                        Divider().frame(height: 32).opacity(0.3)
-                        metaCell(title: items[1].0, content: items[1].1)
-                    }
-                    Divider().opacity(0.2)
-                    HStack(spacing: 0) {
-                        metaCell(title: items[2].0, content: items[2].1)
-                        Divider().frame(height: 32).opacity(0.3)
-                        metaCell(title: items[3].0, content: items[3].1)
-                    }
-                }
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity)
-                .activityCardStyle()
             }
         }
-    }
-
-    private func metaCell(title: String, content: AnyView) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-            content
-        }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 4)
     }
 
-    private var currentModeDisplayName: String {
+    private var currentModeBadge: String {
         switch state.status.mode {
-        case "global": return "全局代理"
-        case "direct": return "直接连接"
-        default: return "智能规则"
+        case "global": return "GLOBAL"
+        case "direct": return "DIRECT"
+        default: return "RULE"
         }
     }
 
@@ -219,40 +193,12 @@ public struct ActivityDashboardView: View {
         return "---"
     }
 
-    // C. Bento Grid — 按内容宽 3 / 2 / 1 列
-    private var bentoGridView: some View {
-        let cards: [AnyView] = [
-            AnyView(bentoLatencyCard),
-            AnyView(bentoUploadCard),
-            AnyView(bentoDownloadCard),
-            AnyView(bentoConnectionsCard),
-            AnyView(bentoTimelineCard),
-            AnyView(bentoPeriodUsageCard),
-        ]
-        return ViewThatFits(in: .horizontal) {
-            bentoGrid(columns: 3, cards: cards)
-            bentoGrid(columns: 2, cards: cards)
-            bentoGrid(columns: 1, cards: cards)
-        }
-    }
-
-    private func bentoGrid(columns: Int, cards: [AnyView]) -> some View {
-        let grid = Array(repeating: GridItem(.flexible(), spacing: DesignTokens.cardGap), count: columns)
-        return LazyVGrid(columns: grid, spacing: DesignTokens.cardGap) {
-            ForEach(0..<cards.count, id: \.self) { i in
-                cards[i]
-                    .frame(maxWidth: .infinity)
-                    .frame(height: DesignTokens.bentoCardHeight)
-            }
-        }
-    }
-
-    // 卡片 1: INTERNET 延时
-    private var bentoLatencyCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
+    // Col 2: 真实网络延迟
+    private var hudLatencyCol: some View {
+        VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text("网络延迟")
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
 
@@ -260,7 +206,7 @@ public struct ActivityDashboardView: View {
                     isDiagnosing = true
                     Task {
                         await state.fetchDiagnostics(force: true)
-                        try? await Task.sleep(for: .milliseconds(800))
+                        try? await Task.sleep(for: .milliseconds(500))
                         isDiagnosing = false
                     }
                 }) {
@@ -268,411 +214,151 @@ public struct ActivityDashboardView: View {
                         if isDiagnosing {
                             ProgressView()
                                 .controlSize(.mini)
+                                .frame(width: 9, height: 9)
                         } else {
-                            Image(systemName: "bolt.fill")
-                                .font(.system(size: 9))
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 9, weight: .medium))
                         }
-                        Text("网络诊断")
-                            .font(.system(size: 10.5, weight: .medium))
+                        Text(isDiagnosing ? "诊断中" : "测速")
+                            .font(.system(size: 10, weight: .medium))
                     }
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
                     .background(Color.primary.opacity(0.06))
-                    .clipShape(.rect(cornerRadius: 5))
+                    .clipShape(.rect(cornerRadius: 4))
                 }
                 .buttonStyle(.plain)
                 .disabled(isDiagnosing)
             }
 
-            // 大字延时 (采用质感原白色阶，诊断时带有微光渐变扫描动效)
+            let delay = state.diagnostics.internetDelayMs
             HStack(alignment: .lastTextBaseline, spacing: 4) {
-                let delay = state.diagnostics.internetDelayMs
                 if isDiagnosing {
-                    Text(delay > 0 ? "\(delay)" : "…")
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [Color.primary.opacity(0.4), Color.primary, Color.primary.opacity(0.4)],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .opacity(0.75)
-                    Text("诊断中")
-                        .font(.system(size: 11, weight: .medium))
+                    Text("…")
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
                         .foregroundStyle(.secondary)
-                } else if state.diagnostics.fetchedAt == 0 {
-                    Text("--")
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
-                        .foregroundStyle(.secondary.opacity(0.5))
                     Text("检测中")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                } else if delay <= 0 {
+                    Text("--")
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                        .foregroundStyle(.secondary.opacity(0.6))
+                    Text("未测速")
+                        .font(.system(size: 10.5, weight: .medium))
                         .foregroundStyle(.secondary)
                 } else {
-                    Text(delay > 0 ? "\(delay)" : "≤ 1")
-                        .font(.system(size: 30, weight: .bold, design: .rounded))
-                        .foregroundStyle(.primary)
+                    Text("\(delay)")
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                        .foregroundStyle(LatencyFormatter.color(delayMs: delay))
                     Text("ms")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.secondary)
                 }
+
                 Spacer()
-            }
-            .frame(height: 34)
 
-            Divider().opacity(0.2)
-
-            // 三级延时细分 (路由 | DNS | 代理，采用内敛钛灰与克制微语义点)
-            HStack(spacing: 0) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("路由")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(.secondary)
-                    if state.diagnostics.fetchedAt == 0 {
-                        Text("--")
-                            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.secondary.opacity(0.6))
-                    } else {
-                        Text("≤ \(max(state.diagnostics.routeDelayMs, 1)) ms")
-                            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.primary.opacity(0.85))
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("DNS")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(.secondary)
-                    if state.diagnostics.fetchedAt == 0 {
-                        Text("--")
-                            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.secondary.opacity(0.6))
-                    } else {
-                        let dnsDelay = state.diagnostics.dnsDelayMs
-                        Text(dnsDelay > 0 ? "\(dnsDelay) ms" : "正常")
-                            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.primary.opacity(0.85))
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("代理")
-                        .font(.system(size: 9.5))
-                        .foregroundStyle(.secondary)
+                HStack(spacing: 6) {
+                    detailDelayItem(label: "网关", ms: state.diagnostics.routeDelayMs)
+                    detailDelayItem(label: "DNS", ms: state.diagnostics.dnsDelayMs)
                     if state.status.mode == "direct" {
-                        Text("不适用")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundStyle(.secondary)
-                    } else if state.diagnostics.fetchedAt == 0 {
-                        Text("--")
-                            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                            .foregroundStyle(.secondary.opacity(0.6))
+                        Text("直连").font(.system(size: 9.5, weight: .medium)).foregroundStyle(.secondary)
                     } else {
-                        let proxyDelay = state.diagnostics.proxyDelayMs > 0 ? state.diagnostics.proxyDelayMs : state.status.delayMs
-                        Text(proxyDelay > 0 ? "\(proxyDelay) ms" : "---")
-                            .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                            .foregroundStyle(proxyDelay > 0 ? Color.primary.opacity(0.85) : Color.secondary)
+                        detailDelayItem(label: "代理", ms: state.diagnostics.proxyDelayMs > 0 ? state.diagnostics.proxyDelayMs : state.status.delayMs)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        .padding(13)
-        .activityCardStyle()
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // 卡片 2: 上传速率
-    private var bentoUploadCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private func detailDelayItem(label: String, ms: Int) -> some View {
+        HStack(spacing: 2) {
+            Text("\(label):")
+                .font(.system(size: 9.5))
+                .foregroundStyle(.secondary)
+            Text(ms > 0 ? "\(ms)" : "--")
+                .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
+                .foregroundStyle(ms > 0 ? LatencyFormatter.color(delayMs: ms) : Color.secondary)
+        }
+    }
+
+    // Col 3: 实时下行与上行速率
+    private var hudThroughputCol: some View {
+        VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("上传速率")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.secondary)
+                Text("实时速率")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
                 Spacer()
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.secondary)
+                Text("累计: \(Formatters.bytesString(state.downloadTotal + state.uploadTotal))")
+                    .font(.system(size: 9.5, design: .monospaced))
+                    .foregroundStyle(.secondary.opacity(0.8))
             }
 
-            // 大数字 (使用主文本色，沉稳高级)
-            HStack(alignment: .lastTextBaseline, spacing: 4) {
-                Text(Formatters.speedString(state.currentUpSpeed))
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
-                    .foregroundColor(.primary)
-                Spacer()
-            }
-            .frame(height: 34)
-
-            Spacer()
-
-            // 极简微示波线 (超薄精致 3pt)
-            GeometryReader { geo in
-                let ratio = min(max(CGFloat(state.currentUpSpeed) / 1048576.0, 0.04), 1.0)
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(Color.primary.opacity(0.06))
-                        .frame(height: 3)
-
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(Color.primary.opacity(0.45))
-                        .frame(width: max(geo.size.width * ratio, 6), height: 3)
-                        .animation(.linear(duration: 0.3), value: ratio)
+            HStack(spacing: 12) {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.down")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(TrafficColors.down)
+                    Text(Formatters.speedString(state.currentDownSpeed))
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.primary)
                 }
-            }
-            .frame(height: 3)
-        }
-        .padding(13)
-        .activityCardStyle()
-    }
-
-    // 卡片 3: 下载速率
-    private var bentoDownloadCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("下载速率")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.secondary)
-                Spacer()
-                Image(systemName: "arrow.down")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.secondary)
-            }
-
-            // 大数字 (主文本色)
-            HStack(alignment: .lastTextBaseline, spacing: 4) {
-                Text(Formatters.speedString(state.currentDownSpeed))
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
-                    .foregroundColor(.primary)
-                Spacer()
-            }
-            .frame(height: 34)
-
-            Spacer()
-
-            // 极简微示波线 (超薄精致 3pt)
-            GeometryReader { geo in
-                let ratio = min(max(CGFloat(state.currentDownSpeed) / 2097152.0, 0.04), 1.0)
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(Color.primary.opacity(0.06))
-                        .frame(height: 3)
-
-                    RoundedRectangle(cornerRadius: 1.5)
-                        .fill(Color.primary.opacity(0.65))
-                        .frame(width: max(geo.size.width * ratio, 6), height: 3)
-                        .animation(.linear(duration: 0.3), value: ratio)
-                }
-            }
-            .frame(height: 3)
-        }
-        .padding(13)
-        .activityCardStyle()
-    }
-
-    // 卡片 4: 活动连接
-    private var bentoConnectionsCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("活动连接")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.secondary)
-                Spacer()
-                // 呼吸绿灯
-                Circle()
-                    .fill(state.status.running ? Color.green : Color.secondary.opacity(0.4))
-                    .frame(width: 8, height: 8)
-            }
-
-            // 大数字
-            HStack(alignment: .lastTextBaseline, spacing: 5) {
-                Text("\(state.status.running ? state.connections.count : 0)")
-                    .font(.system(size: 26, weight: .bold, design: .rounded))
-                    .foregroundColor(.primary)
-                Text("并发")
-                    .font(.system(size: 11.5))
-                    .foregroundColor(.secondary)
-                Spacer()
-            }
-            .frame(height: 34)
-
-            Divider().opacity(0.2)
-
-            // 真实协议与分流明细分布
-            VStack(alignment: .leading, spacing: 3) {
-                let tcpCount = state.connections.filter { ($0.metadata?.network ?? "tcp").lowercased() == "tcp" }.count
-                let udpCount = state.connections.filter { ($0.metadata?.network ?? "").lowercased() == "udp" }.count
-                let procCount = max(Set(state.connections.map { $0.effectiveProcess }).count, state.topProcesses.count)
 
                 HStack(spacing: 4) {
-                    Text("\(procCount)")
-                        .font(.system(size: 10.5, weight: .bold))
-                    Text("个应用")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
-                    Text("·").foregroundColor(.secondary)
-                    Text("\(tcpCount)")
-                        .font(.system(size: 10.5, weight: .bold))
-                    Text("TCP")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
-                    Text("·").foregroundColor(.secondary)
-                    Text("\(udpCount)")
-                        .font(.system(size: 10.5, weight: .bold))
-                    Text("UDP")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary)
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundStyle(TrafficColors.up)
+                    Text(Formatters.speedString(state.currentUpSpeed))
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                        .foregroundStyle(.primary)
                 }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // Col 4: 活跃连接监控大盘
+    private var hudConnectionsCol: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text("活跃连接")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Circle()
+                    .fill(state.status.running ? Color.green : Color.secondary.opacity(0.4))
+                    .frame(width: 6.5, height: 6.5)
+            }
+
+            HStack(alignment: .lastTextBaseline, spacing: 6) {
+                Text("\(state.status.running ? state.connections.count : 0)")
+                    .font(.system(size: 20, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.primary)
+                Text("并发")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+
+                Spacer()
 
                 let proxyCount = state.connections.filter { $0.isProxy }.count
                 let directCount = state.connections.filter { $0.isDirect }.count
-                Text("\(proxyCount) 代理分流 · \(directCount) 规则直连")
-                    .font(.system(size: 9.5))
-                    .foregroundColor(.secondary.opacity(0.8))
-            }
-        }
-        .padding(13)
-        .activityCardStyle()
-    }
-
-    // 卡片 5: 实时流量时序示波器 (克制单色微透明阶梯，专业沉稳)
-    private var bentoTimelineCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("实时吞吐 (60s)")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.secondary)
-
-                Spacer()
-
-                // 示波通道切换 (小巧精致)
-                Picker("", selection: $timelineFilter) {
-                    Text("双向").tag("all")
-                    Text("下行").tag("down")
-                    Text("上行").tag("up")
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 125)
-            }
-
-            // 60 秒真实流量波动柱状示波图 (专业级低噪透明柱)
-            VStack(spacing: 5) {
-                GeometryReader { geo in
-                    let points = state.trafficHistory
-                    let maxSpeed = max(points.map { max($0.downloadSpeed, $0.uploadSpeed) }.max() ?? 1024, 10240)
-                    let barWidth = max((geo.size.width - CGFloat(max(points.count - 1, 0)) * 2) / CGFloat(max(points.count, 1)), 1.5)
-
-                    HStack(alignment: .bottom, spacing: 2) {
-                        ForEach(points) { pt in
-                            let downRatio = min(max(CGFloat(pt.downloadSpeed) / CGFloat(maxSpeed), 0.03), 1.0)
-                            let upRatio = min(max(CGFloat(pt.uploadSpeed) / CGFloat(maxSpeed), 0.03), 1.0)
-
-                            VStack(spacing: 1) {
-                                Spacer()
-                                if timelineFilter == "all" || timelineFilter == "up" {
-                                    RoundedRectangle(cornerRadius: 1)
-                                        .fill(Color.primary.opacity(0.32))
-                                        .frame(width: barWidth, height: geo.size.height * upRatio * (timelineFilter == "all" ? 0.45 : 0.95))
-                                }
-                                if timelineFilter == "all" || timelineFilter == "down" {
-                                    RoundedRectangle(cornerRadius: 1)
-                                        .fill(Color.primary.opacity(0.68))
-                                        .frame(width: barWidth, height: geo.size.height * downRatio * (timelineFilter == "all" ? 0.55 : 0.95))
-                                }
-                            }
-                        }
-                    }
-                }
-                .frame(height: 48)
-
-                // 底部时间标尺
-                HStack {
-                    Text("-60s").frame(maxWidth: .infinity, alignment: .leading)
-                    Text("-30s").frame(maxWidth: .infinity, alignment: .center)
-                    Text("实时").frame(maxWidth: .infinity, alignment: .trailing)
-                }
-                .font(.system(size: 9, design: .monospaced))
-                .foregroundColor(.secondary.opacity(0.8))
-            }
-        }
-        .padding(13)
-        .activityCardStyle()
-    }
-
-    // 卡片 6: 累计流量与上下行占比 (极简高质感)
-    private var bentoPeriodUsageCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text("当前会话累计流量")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.secondary)
-                Spacer()
-                Button(action: {
-                    state.refreshAll()
-                }) {
-                    Image(systemName: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 9.5))
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help("刷新会话统计")
-            }
-
-            // 大数字：真实总流量 (主文本色)
-            let totalUsage = state.downloadTotal + state.uploadTotal
-            HStack(alignment: .lastTextBaseline, spacing: 4) {
-                Text(Formatters.bytesString(totalUsage))
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .foregroundColor(.primary)
-                Spacer()
-            }
-            .frame(height: 34)
-
-            Spacer()
-
-            // 极细双色比例条 (3.5pt 高度，轻盈精致)
-            VStack(alignment: .leading, spacing: 4) {
-                GeometryReader { geo in
-                    let total = max(state.downloadTotal + state.uploadTotal, 1)
-                    let downW = totalUsage > 0 ? (CGFloat(state.downloadTotal) / CGFloat(total)) * (geo.size.width - 2) : geo.size.width * 0.5
-                    let upW = totalUsage > 0 ? max(geo.size.width - downW - 2, 0) : geo.size.width * 0.5
-
-                    HStack(spacing: 2) {
-                        RoundedRectangle(cornerRadius: 1.5)
-                            .fill(Color.primary.opacity(0.65))
-                            .frame(width: max(downW, 2))
-                        RoundedRectangle(cornerRadius: 1.5)
-                            .fill(Color.primary.opacity(0.25))
-                            .frame(width: max(upW, 2))
-                    }
-                }
-                .frame(height: 3.5)
-
-                // 图例说明 (等宽小字体)
-                HStack {
-                    HStack(spacing: 3) {
-                        Circle().fill(Color.primary.opacity(0.65)).frame(width: 4.5, height: 4.5)
-                        Text("下行: \(Formatters.bytesString(state.downloadTotal))")
-                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                    }
-                    Spacer()
-                    HStack(spacing: 3) {
-                        Circle().fill(Color.primary.opacity(0.25)).frame(width: 4.5, height: 4.5)
-                        Text("上行: \(Formatters.bytesString(state.uploadTotal))")
-                            .font(.system(size: 8.5, weight: .medium, design: .monospaced))
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                    }
+                HStack(spacing: 6) {
+                    Text("代理 \(proxyCount)")
+                        .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                        .foregroundStyle(Color.accentColor)
+                    Text("·").foregroundStyle(.secondary)
+                    Text("直连 \(directCount)")
+                        .font(.system(size: 9.5, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
                 }
             }
         }
-        .padding(13)
-        .activityCardStyle()
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    // C. 工具条与过滤器组件
     private var connectionFilterPicker: some View {
         Picker("", selection: $connectionFilter) {
             Text("全部 (\(state.connections.count))").tag("all")
@@ -686,46 +372,20 @@ public struct ActivityDashboardView: View {
     }
 
     private var connectionSearchField: some View {
-        HStack(spacing: 5) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-            TextField("搜索应用 / 域名 / IP...", text: $connectionSearchText)
-                .font(.system(size: 11))
-                .textFieldStyle(.plain)
-            if !connectionSearchText.isEmpty {
-                Button(action: { connectionSearchText = "" }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("清除活动连接搜索")
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4.5)
-        .background(Color(NSColor.controlBackgroundColor).opacity(0.8))
-        .clipShape(.rect(cornerRadius: 6))
-        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.8))
+        ExquisiteSearchField(placeholder: "搜索应用 / 域名 / IP…", text: $state.activityFilterText)
     }
 
-    // D. 实时网络连接流与活跃应用 (根据剩余可用高度自适应展示，杜绝全页纵向滚动条)
-    private func liveConnectionsStreamSection(availableHeight: CGFloat) -> some View {
+    // D. 实时网络连接流主舞台 (Zone 2: 占全屏 75%+ 垂直主空间，全尺寸纵向平滑滚动)
+    private var liveConnectionsStreamSection: some View {
         let filteredList = filteredLiveConnections
-        let evaluatorOffset: CGFloat = showRuleEvaluator ? 45 : 0
-        // 根据可用高度动态计算最多容纳的行数 (每行约 34pt，表头与底栏约 70pt，自适应 2~8 行)
-        let maxDisplayRows = max(min(Int((availableHeight - 70 - evaluatorOffset) / 34), 8), 2)
-        let displayList = Array(filteredList.prefix(maxDisplayRows))
 
         return VStack(alignment: .leading, spacing: 8) {
-            // SecondaryZone 工具条
+            // 工具条
             HStack(spacing: 10) {
                 HStack(spacing: 6) {
                     Label("实时连接", systemImage: "network")
                         .font(.system(size: 13, weight: .bold))
-                    let activeCount = state.connections.count
-                    Text("\(activeCount)")
+                    Text("\(filteredList.count)")
                         .font(.system(size: 10.5, weight: .bold, design: .monospaced))
                         .foregroundStyle(.primary)
                         .padding(.horizontal, 6)
@@ -735,19 +395,21 @@ public struct ActivityDashboardView: View {
                 }
 
                 connectionFilterPicker
-                    .frame(maxWidth: 220)
+                    .frame(maxWidth: 240)
 
                 connectionSearchField
-                    .frame(maxWidth: 200)
+                    .frame(maxWidth: 220)
 
-                // ⚡️ 规则测试 切换按钮
+                // 规则测试 切换按钮
                 Button(action: {
                     withAnimation(.easeInOut(duration: 0.22)) {
                         showRuleEvaluator.toggle()
                     }
                 }) {
                     HStack(spacing: 4) {
-                        Text("⚡️ 规则测试")
+                        Image(systemName: "bolt.shield")
+                            .font(.system(size: 11))
+                        Text("规则测试")
                             .font(.system(size: 11, weight: .medium))
                     }
                     .padding(.horizontal, 8)
@@ -765,25 +427,17 @@ public struct ActivityDashboardView: View {
 
                 Spacer(minLength: 0)
 
-                // 显式引导：完整日志入口 (与快捷键 ⌘D 呼应)
-                Button(action: { InspectorWindowController.shared.show() }) {
-                    HStack(spacing: 4) {
-                        Text("完整网络日志")
-                            .font(.system(size: 11, weight: .medium))
-                        Text("⌘D")
-                            .font(.system(size: 9.5, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(.secondary)
-                        Image(systemName: "arrow.up.forward.app")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.secondary)
+                if filteredList.count > 0 {
+                    Button(action: { showCloseAllAlert = true }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "xmark.circle")
+                                .font(.system(size: 10))
+                            Text("断开全部")
+                                .font(.system(size: 10.5, weight: .medium))
+                        }
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.primary.opacity(0.06))
-                    .clipShape(.rect(cornerRadius: 6))
+                    .buttonStyle(.exquisiteDestructive(height: 24))
                 }
-                .buttonStyle(.plain)
-                .help("打开独立网络请求日志与诊断窗口 (⌘D)")
             }
 
             // 规则即时仿真测试条
@@ -792,42 +446,45 @@ public struct ActivityDashboardView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            // 连接数据卡片与抽屉联动
+            // 连接数据大表与抽屉联动
             if filteredList.isEmpty {
                 VStack(spacing: 8) {
+                    Spacer()
                     Image(systemName: state.status.running ? "waveform.path.ecg" : "network.slash")
-                        .font(.system(size: 24))
+                        .font(.system(size: 28))
                         .foregroundColor(.secondary.opacity(0.4))
-                    Text(state.status.running ? (connectionSearchText.isEmpty ? "暂无活跃网络长连接 · 内核正在持续监听流量" : "无匹配的网络连接记录") : "代理内核未运行")
-                        .font(.system(size: 12))
+                    Text(state.status.running ? (state.activityFilterText.isEmpty ? "暂无活跃网络长连接 · 内核正在持续监听流量" : "无匹配的网络连接记录") : "代理内核未运行")
+                        .font(.system(size: 12.5))
                         .foregroundColor(.secondary)
+                    Spacer()
                 }
-                .frame(maxWidth: .infinity)
-                .frame(height: 120)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(
-                    RoundedRectangle(cornerRadius: 10)
+                    RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
                         .fill(.ultraThinMaterial)
                 )
-                .liquidGlassBorder(cornerRadius: 10)
+                .overlay(
+                    NativeHairlineBorder(cornerRadius: AsterMetrics.radiusCard)
+                )
             } else {
                 HStack(alignment: .top, spacing: 12) {
                     VStack(spacing: 0) {
-                        // 表头 (极简规范对齐)
+                        // 表头 (固定顶置)
                         HStack(spacing: 12) {
                             Text("应用 / 进程")
                                 .font(.system(size: 10.5, weight: .semibold))
                                 .foregroundColor(.secondary)
-                                .frame(width: 115, alignment: .leading)
+                                .frame(width: 120, alignment: .leading)
 
                             Text("目标地址")
                                 .font(.system(size: 10.5, weight: .semibold))
                                 .foregroundColor(.secondary)
-                                .frame(minWidth: 120, maxWidth: .infinity, alignment: .leading)
+                                .frame(minWidth: 140, maxWidth: .infinity, alignment: .leading)
 
                             Text("命中分流规则")
                                 .font(.system(size: 10.5, weight: .semibold))
                                 .foregroundColor(.secondary)
-                                .frame(width: 100, alignment: .leading)
+                                .frame(width: 105, alignment: .leading)
 
                             Text("出站链路")
                                 .font(.system(size: 10.5, weight: .semibold))
@@ -837,7 +494,7 @@ public struct ActivityDashboardView: View {
                             Text("累计流量")
                                 .font(.system(size: 10.5, weight: .semibold))
                                 .foregroundColor(.secondary)
-                                .frame(width: 75, alignment: .trailing)
+                                .frame(width: 80, alignment: .trailing)
 
                             Text("状态")
                                 .font(.system(size: 10.5, weight: .semibold))
@@ -845,61 +502,43 @@ public struct ActivityDashboardView: View {
                                 .frame(width: 80, alignment: .trailing)
                         }
                         .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
+                        .padding(.vertical, 8)
                         .background(Color.primary.opacity(0.025))
 
                         Divider().opacity(0.2)
 
-                        // 动态自适应行数
-                        ForEach(displayList) { conn in
-                            LiveConnectionRow(
-                                conn: conn,
-                                isSelected: selectedConnection?.id == conn.id,
-                                onSelect: {
-                                    withAnimation(.easeInOut(duration: 0.22)) {
-                                        if selectedConnection?.id == conn.id {
-                                            selectedConnection = nil
-                                        } else {
-                                            selectedConnection = conn
+                        // 原生顺畅纵向滚动列表 (全尺寸充满剩余空间，零截断)
+                        ScrollView {
+                            LazyVStack(spacing: 0) {
+                                ForEach(filteredList) { conn in
+                                    LiveConnectionRow(
+                                        conn: conn,
+                                        isSelected: selectedConnection?.id == conn.id,
+                                        onSelect: {
+                                            withAnimation(.easeInOut(duration: 0.22)) {
+                                                if selectedConnection?.id == conn.id {
+                                                    selectedConnection = nil
+                                                } else {
+                                                    selectedConnection = conn
+                                                }
+                                            }
                                         }
+                                    )
+                                    if conn.id != filteredList.last?.id {
+                                        Divider().opacity(0.18).padding(.leading, 14)
                                     }
-                                }
-                            )
-                            if conn.id != displayList.last?.id {
-                                Divider().opacity(0.18).padding(.leading, 14)
-                            }
-                        }
-
-                        // 底部优雅说明条 (仅作状态流向指引，保留右上角唯一 ⌘D 入口)
-                        Divider().opacity(0.2)
-                        HStack {
-                            Image(systemName: "info.circle")
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary.opacity(0.8))
-                            Text("实时看板仅展示活跃连接 (前 \(displayList.count)/\(filteredList.count) 条) · 完整流向与历史审计请通过右上角 ⌘D 网络日志审查")
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary)
-
-                            Spacer()
-                        }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 6)
-                        .background(Color.primary.opacity(0.015))
-                        .contentShape(Rectangle())
-                        .onTapGesture {
-                            if selectedConnection != nil {
-                                withAnimation(.easeInOut(duration: 0.22)) {
-                                    selectedConnection = nil
                                 }
                             }
                         }
                     }
                     .background(
-                        RoundedRectangle(cornerRadius: 10)
+                        RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
                             .fill(.ultraThinMaterial)
                     )
-                    .liquidGlassBorder(cornerRadius: 10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .overlay(
+                        NativeHairlineBorder(cornerRadius: AsterMetrics.radiusCard)
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
 
                     if let selected = selectedConnection {
                         let activeConn = filteredList.first(where: { $0.id == selected.id }) ?? state.connections.first(where: { $0.id == selected.id }) ?? selected
@@ -908,13 +547,17 @@ public struct ActivityDashboardView: View {
                                 selectedConnection = nil
                             }
                         })
-                        .frame(maxHeight: max(availableHeight - evaluatorOffset - 40, 260))
-                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                        .liquidGlassBorder(cornerRadius: 10)
+                        .frame(width: 320)
+                        .frame(maxHeight: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous))
+                        .overlay(
+                            NativeHairlineBorder(cornerRadius: AsterMetrics.radiusCard)
+                        )
                         .shadow(color: Color.black.opacity(0.08), radius: 10, x: -2, y: 2)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
     }
@@ -926,8 +569,8 @@ public struct ActivityDashboardView: View {
         } else if connectionFilter == "direct" {
             list = list.filter { $0.isDirect }
         }
-        if !connectionSearchText.isEmpty {
-            let kw = connectionSearchText.lowercased()
+        if !state.activityFilterText.isEmpty {
+            let kw = state.activityFilterText.lowercased()
             list = list.filter {
                 $0.effectiveProcess.lowercased().contains(kw) ||
                 ($0.metadata?.host ?? "").lowercased().contains(kw) ||
@@ -941,7 +584,7 @@ public struct ActivityDashboardView: View {
 
 // MARK: - 实时长连接行组件 (克制配色、专业降噪排版)
 public struct LiveConnectionRow: View {
-    @ObservedObject var state = AsterState.shared
+    private let state = AsterState.shared
     public var conn: ConnectionItem
     public var isSelected: Bool
     public var onSelect: () -> Void
@@ -962,10 +605,7 @@ public struct LiveConnectionRow: View {
         HStack(spacing: 12) {
             // 应用 / 进程
             HStack(spacing: 6) {
-                let icon = state.iconForProcess(path: conn.metadata?.processPath ?? "", name: conn.effectiveProcess, size: 15)
-                Image(nsImage: icon)
-                    .resizable()
-                    .frame(width: 15, height: 15)
+                AppIconView(processPath: conn.metadata?.processPath ?? "", processName: conn.effectiveProcess, size: 15)
                 Text(conn.effectiveProcess)
                     .font(.system(size: 11.5, weight: .medium))
                     .foregroundColor(.primary)
@@ -1001,7 +641,16 @@ public struct LiveConnectionRow: View {
 
             // 出站链路 / 节点
             HStack(spacing: 4) {
-                let chain = conn.chains?.last ?? (conn.rule == "direct" ? "DIRECT" : "Proxy")
+                let chain: String = {
+                    if let last = conn.chains?.last, !last.isEmpty {
+                        return last
+                    }
+                    let lowerRule = (conn.rule ?? "").lowercased()
+                    if lowerRule == "direct" { return "DIRECT" }
+                    if lowerRule == "reject" || lowerRule == "block" { return "REJECT" }
+                    if !state.status.selectedLabel.isEmpty { return state.status.selectedLabel }
+                    return "PROXY"
+                }()
                 ActionBadge(action: chain)
             }
             .frame(width: 95, alignment: .leading)
@@ -1083,7 +732,7 @@ public struct LiveConnectionRow: View {
 
 // MARK: - 嵌入式规则即时仿真测试条
 public struct RuleEvaluatorBar: View {
-    @ObservedObject var state = AsterState.shared
+    private let state = AsterState.shared
     @State private var targetInput: String = ""
     @State private var isEvaluating: Bool = false
     @State private var evalResult: RuleEvaluateResult? = nil
@@ -1302,11 +951,12 @@ public struct RuleEvaluatorBar: View {
 private extension View {
     func activityCardStyle() -> some View {
         self.background(
-            RoundedRectangle(cornerRadius: DesignTokens.cardRadius)
+            RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
                 .fill(.ultraThinMaterial)
         )
-        .liquidGlassBorder(cornerRadius: DesignTokens.cardRadius)
-        .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
+        .overlay(
+            NativeHairlineBorder(cornerRadius: AsterMetrics.radiusCard)
+        )
     }
 }
 

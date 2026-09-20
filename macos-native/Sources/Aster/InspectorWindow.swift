@@ -170,7 +170,8 @@ public struct SurgeProLogsView: View {
     private var deviceAggregations: [(device: String, rawIP: String, count: Int, activeCount: Int)] {
         var map = [String: (name: String, total: Int, active: Int)]()
         for c in allRequestsPool {
-            let srcIP = c.metadata?.sourceIP?.trimmingCharacters(in: .whitespaces) ?? "127.0.0.1"
+            let rawSrcIP = c.metadata?.sourceIP?.trimmingCharacters(in: .whitespaces) ?? ""
+            let srcIP = rawSrcIP.isEmpty ? "本机" : rawSrcIP
             let label = deviceLabelForIP(srcIP)
             var current = map[srcIP] ?? (name: label, total: 0, active: 0)
             current.total += 1
@@ -207,7 +208,8 @@ public struct SurgeProLogsView: View {
 
             // 4. 设备筛选
             if let deviceIP = selectedDevice, !deviceIP.isEmpty {
-                let srcIP = conn.metadata?.sourceIP ?? "127.0.0.1"
+                let rawSrcIP = conn.metadata?.sourceIP?.trimmingCharacters(in: .whitespaces) ?? ""
+                let srcIP = rawSrcIP.isEmpty ? "本机" : rawSrcIP
                 if srcIP != deviceIP && deviceLabelForIP(srcIP) != deviceIP {
                     return false
                 }
@@ -441,7 +443,6 @@ public struct SurgeProLogsView: View {
             } else {
                 ForEach(clientAggregations, id: \.name) { item in
                     let isSelected = selectedClient == item.name
-                    let icon = state.iconForProcess(path: "", name: item.name, size: 17)
 
                     Button(action: {
                         selectedClient = isSelected ? nil : item.name
@@ -451,10 +452,7 @@ public struct SurgeProLogsView: View {
                                 .fill(isSelected ? Color.accentColor : Color.clear)
                                 .frame(width: 3.5, height: 16)
 
-                            Image(nsImage: icon)
-                                .resizable()
-                                .frame(width: 17, height: 17)
-                                .clipShape(.rect(cornerRadius: 3.5))
+                            AppIconView(processPath: "", processName: item.name, size: 17)
 
                             Text(item.name)
                                 .font(.system(size: 12.5, weight: isSelected ? .semibold : .regular))
@@ -632,7 +630,6 @@ public struct SurgeProLogsView: View {
                     Circle()
                         .fill(connectionStore.status.running ? Color.green : Color.orange)
                         .frame(width: 5.5, height: 5.5)
-                        .shadow(color: connectionStore.status.running ? Color.green.opacity(0.5) : Color.clear, radius: 2)
                     Text(connectionStore.status.running ? "实时流同步" : "已休眠")
                         .font(.system(size: 10.5, weight: .medium))
                         .foregroundStyle(.secondary)
@@ -657,42 +654,23 @@ public struct SurgeProLogsView: View {
 
             Spacer()
 
-            // 搜索框 (8pt 圆角)
-            HStack(spacing: 7) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                    .font(.system(size: 11.5))
-                TextField("搜索域名、应用、设备或规则", text: $searchText)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 11.5))
-                if !searchText.isEmpty {
-                    Button(action: { searchText = "" }) {
-                        Image(systemName: "xmark.circle.fill")
-                            .foregroundStyle(.secondary)
-                            .font(.system(size: 11))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("清除面板搜索")
-                }
-            }
-            .padding(.horizontal, 9)
-            .padding(.vertical, 5)
-            .background(Color(NSColor.controlBackgroundColor))
-            .clipShape(.rect(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.primary.opacity(0.08), lineWidth: 0.8)
+            // 搜索框 (发丝边框标准化组件)
+            ExquisiteSearchField(
+                placeholder: "搜索域名、应用、设备或规则",
+                text: $searchText,
+                width: 220
             )
-            .frame(width: 220)
 
-            // ⚡️ 规则测试 切换按钮
+            // 规则测试 切换按钮
             Button(action: {
                 withAnimation(.easeInOut(duration: 0.22)) {
                     showRuleEvaluator.toggle()
                 }
             }) {
                 HStack(spacing: 4) {
-                    Text("⚡️ 规则测试")
+                    Image(systemName: "bolt.shield")
+                        .font(.system(size: 11))
+                    Text("规则测试")
                         .font(.system(size: 11, weight: .medium))
                 }
                 .padding(.horizontal, 8)
@@ -902,11 +880,11 @@ public struct SurgeProLogsView: View {
         let isClosed = conn.isClosed ?? false
         let proto = detectProtocol(conn)
         let procName = conn.effectiveProcess
-        let icon = state.iconForProcess(path: conn.metadata?.processPath ?? "", name: procName, size: 16)
         let host = conn.metadata?.host ?? ""
         let ipPort = "\(conn.metadata?.destinationIP ?? ""):\(conn.metadata?.destinationPort ?? "")"
         let primaryTarget = !host.isEmpty ? host : (conn.metadata?.destinationIP ?? "未知目标")
-        let srcIP = conn.metadata?.sourceIP ?? "127.0.0.1"
+        let rawSrcIP = conn.metadata?.sourceIP?.trimmingCharacters(in: .whitespaces) ?? ""
+        let srcIP = rawSrcIP.isEmpty ? "本机" : rawSrcIP
         let deviceLabel = deviceLabelForIP(srcIP)
         let ruleStr = "\(conn.rule ?? "FINAL") \(conn.rulePayload ?? "")".trimmingCharacters(in: .whitespaces)
         let policyStr = conn.chains?.last ?? (connectionStore.status.selectedLabel.isEmpty ? "DIRECT" : connectionStore.status.selectedLabel)
@@ -930,10 +908,7 @@ public struct SurgeProLogsView: View {
 
                     // 2. 客户端应用 (105pt)
                     HStack(spacing: 5) {
-                        Image(nsImage: icon)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 14, height: 14)
+                        AppIconView(processPath: conn.metadata?.processPath ?? "", processName: procName, size: 14)
                         Text(procName.truncated(toVisualWidth: 12))
                             .font(.system(size: 11.5, weight: .medium))
                             .foregroundStyle(.primary.opacity(0.9))
@@ -1156,17 +1131,17 @@ public struct SurgeProLogsView: View {
     private func formatCloseReason(_ conn: ConnectionItem) -> String {
         if let reason = conn.diagnostics?.closeReason {
             switch reason {
-            case "rejected": return "⊘ 规则阻断"
-            case "timeout": return "⏱ 连接超时"
-            case "dns_failed": return "⚠ DNS 异常"
-            case "completed": return "✓ 正常完成"
-            case "active": return "● 活跃传输中"
+            case "rejected": return "规则阻断"
+            case "timeout": return "连接超时"
+            case "dns_failed": return "DNS 异常"
+            case "completed": return "正常完成"
+            case "active": return "活跃传输中"
             default: return reason
             }
         }
-        if conn.isReject { return "⊘ 规则阻断" }
-        if conn.isClosed == true { return "✓ 已关闭" }
-        return "● 活跃传输中"
+        if conn.isReject { return "规则阻断" }
+        if conn.isClosed == true { return "已关闭" }
+        return "活跃传输中"
     }
 
     private func copyToClipboard(_ text: String) {
@@ -1232,8 +1207,8 @@ public struct SurgeProLogsView: View {
         let proto = detectProtocol(conn)
         let targetHost = conn.metadata?.host ?? "--"
         let destIP = conn.metadata?.destinationIP ?? "--"
-        let destPort = conn.metadata?.destinationPort ?? "--"
-        let srcIP = conn.metadata?.sourceIP ?? "127.0.0.1"
+        let rawSrcIP = conn.metadata?.sourceIP?.trimmingCharacters(in: .whitespaces) ?? ""
+        let srcIP = rawSrcIP.isEmpty ? "本机" : rawSrcIP
         let policyStr = conn.chains?.last ?? "DIRECT"
 
         return VStack(spacing: 0) {
@@ -1514,8 +1489,7 @@ public struct SurgeProLogsView: View {
                             .font(.system(size: 10.5))
                     }
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+                .buttonStyle(.exquisiteDestructive(height: 22))
             }
         }
         .padding(.horizontal, 16)

@@ -139,6 +139,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
     private var statusBarTunItem: NSMenuItem?
     private var appMenuSystemProxyItem: NSMenuItem?
     private var appMenuTunItem: NSMenuItem?
+    private var appMenuRuleItem: NSMenuItem?
+    private var appMenuGlobalItem: NSMenuItem?
+    private var appMenuDirectItem: NSMenuItem?
     private var shouldReopenStatusMenuAfterSpeedtest = false
 
     static func main() {
@@ -304,7 +307,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
     }
 
     // MARK: - 主控制台视窗管理 (无滚动条默认尺寸 + 窗口缩放位置记忆)
-    func showMainWindow() {
+    func showMainWindow(tab: SidebarTab? = nil) {
+        if let tab = tab {
+            AsterState.shared.selectedTab = tab
+        }
         if window == nil {
             let defaultRect = NSRect(x: 0, y: 0, width: 1120, height: 760)
             let win = NSWindow(
@@ -434,6 +440,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         let copyCmdItem = controlMenu.addItem(withTitle: "复制终端代理", action: #selector(onCopyTerminalCommand), keyEquivalent: "c")
         copyCmdItem.keyEquivalentModifierMask = [.command, .shift]
         copyCmdItem.target = self
+        controlMenu.addItem(NSMenuItem.separator())
+        let modeMenuItem = NSMenuItem(title: "出站模式", action: nil, keyEquivalent: "")
+        let modeMenu = NSMenu(title: "出站模式")
+        let ruleItem = modeMenu.addItem(withTitle: "规则分流 (Rule)", action: #selector(onSetModeRule), keyEquivalent: "1")
+        ruleItem.keyEquivalentModifierMask = [.command, .control]
+        ruleItem.target = self
+        let globalItem = modeMenu.addItem(withTitle: "全局代理 (Global)", action: #selector(onSetModeGlobal), keyEquivalent: "2")
+        globalItem.keyEquivalentModifierMask = [.command, .control]
+        globalItem.target = self
+        let directItem = modeMenu.addItem(withTitle: "直接连接 (Direct)", action: #selector(onSetModeDirect), keyEquivalent: "3")
+        directItem.keyEquivalentModifierMask = [.command, .control]
+        directItem.target = self
+        modeMenuItem.submenu = modeMenu
+        controlMenu.addItem(modeMenuItem)
+        appMenuRuleItem = ruleItem
+        appMenuGlobalItem = globalItem
+        appMenuDirectItem = directItem
         controlMenu.addItem(NSMenuItem.separator())
         let testAllItem = controlMenu.addItem(withTitle: "测速全部节点", action: #selector(onSpeedtestAll), keyEquivalent: "t")
         testAllItem.target = self
@@ -584,24 +607,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
 
         let modeMenu = NSMenu(title: "出站模式")
         modeMenu.autoenablesItems = false
-        modeMenu.addItem(makeStickyItem(
-            title: "规则分流 (RULE)",
-            icon: "arrow.triangle.branch",
-            checked: state.status.mode == "rule",
-            kind: .mode("rule")
-        ) { AsterState.shared.setMode("rule") })
-        modeMenu.addItem(makeStickyItem(
-            title: "全局代理 (GLOBAL)",
-            icon: "globe.asia.australia.fill",
-            checked: state.status.mode == "global",
-            kind: .mode("global")
-        ) { AsterState.shared.setMode("global") })
-        modeMenu.addItem(makeStickyItem(
-            title: "直接连接 (DIRECT)",
-            icon: "bolt.horizontal.fill",
-            checked: state.status.mode == "direct",
-            kind: .mode("direct")
-        ) { AsterState.shared.setMode("direct") })
+        for appMode in AppMode.allCases {
+            modeMenu.addItem(makeStickyItem(
+                title: "\(appMode.title) (\(appMode.code))",
+                icon: appMode.icon,
+                checked: state.status.mode == appMode.rawValue,
+                kind: .mode(appMode.rawValue)
+            ) { AsterState.shared.setMode(appMode.rawValue) })
+        }
 
         modeRootItem.submenu = modeMenu
         menu.addItem(modeRootItem)
@@ -669,9 +682,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
                     title: displayProcName,
                     image: makeRoundedIcon(rawIcon, size: 12, cornerRadius: 2.5),
                     accessory: speedStr,
-                    toolTip: "\(proc.name) (\(speedStr)) - 点击打开请求日志审查"
-                ) {
-                    InspectorWindowController.shared.show()
+                    toolTip: "\(proc.name) (\(speedStr)) - 点击查看活跃连接与流量"
+                ) { [weak self] in
+                    AsterState.shared.activityFilterText = proc.name
+                    self?.showMainWindow(tab: .activity)
                 }
                 menu.addItem(pItem)
             }
@@ -682,8 +696,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         // ==========================================
         // 4. 网络控制与系统接管 (规范快捷键 ⌘D / ⌘S / ⌘E / ⌘C)
         // ==========================================
-        menu.addItem(makeStickyItem(title: "请求日志…", icon: "list.bullet.rectangle.portrait") {
-            InspectorWindowController.shared.show()
+        menu.addItem(makeStickyItem(title: "请求日志…", icon: "list.bullet.rectangle.portrait") { [weak self] in
+            self?.showMainWindow(tab: .activity)
         })
 
         let sysProxyItem = makeStickyItem(
@@ -717,7 +731,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         // 5. 配置与控制 (⌘R / 切换配置 / 重启应用 / 退出 ⌘Q)
         // ==========================================
         if !state.configs.isEmpty {
-            let activeConfigName = state.configs.first(where: { $0.active })?.name ?? "默认配置"
+            let activeConfigName = state.configs.first(where: { $0.active })?.name ?? (state.status.activeConfigName?.isEmpty == false ? state.status.activeConfigName! : "未激活配置")
             let configRootItem = createMenuItem(title: "切换配置", icon: "doc.plaintext", action: nil)
             configRootItem.identifier = NSUserInterfaceItemIdentifier("aster.active-config")
             
@@ -796,6 +810,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         applyCaptureState(to: statusBarTunItem, systemProxy: false)
         applyCaptureState(to: appMenuSystemProxyItem, systemProxy: true)
         applyCaptureState(to: appMenuTunItem, systemProxy: false)
+        let mode = AsterState.shared.status.mode
+        appMenuRuleItem?.state = (mode == "rule") ? .on : .off
+        appMenuGlobalItem?.state = (mode == "global") ? .on : .off
+        appMenuDirectItem?.state = (mode == "direct") ? .on : .off
     }
 
     private func applyCaptureState(to item: NSMenuItem?, systemProxy: Bool) {
@@ -913,7 +931,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
     }
 
     private func updateConfigMenuTitle(_ item: NSMenuItem, configs: [ConfigProfileItem]) {
-        let activeName = configs.first(where: { $0.active })?.name ?? "默认配置"
+        let activeName = configs.first(where: { $0.active })?.name ?? (AsterState.shared.status.activeConfigName?.isEmpty == false ? AsterState.shared.status.activeConfigName! : "未激活配置")
         let title = NSMutableAttributedString(string: "切换配置", attributes: [
             .font: NSFont.menuFont(ofSize: 0), .foregroundColor: NSColor.labelColor,
         ])
@@ -968,22 +986,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
     }
 
     private func nodeDelayColor(delay: Int, isTesting: Bool) -> NSColor {
-        if isTesting {
-            return .systemBlue
-        }
-        if delay < 0 {
-            return NSColor(calibratedRed: 0.85, green: 0.38, blue: 0.38, alpha: 1.0)
-        }
-        if delay == 0 {
-            return .secondaryLabelColor
-        }
-        if delay <= 150 {
-            return NSColor(calibratedRed: 0.22, green: 0.72, blue: 0.48, alpha: 1.0)
-        }
-        if delay <= 500 {
-            return NSColor(calibratedRed: 0.88, green: 0.62, blue: 0.22, alpha: 1.0)
-        }
-        return NSColor(calibratedRed: 0.85, green: 0.38, blue: 0.38, alpha: 1.0)
+        LatencyFormatter.nsColor(delayMs: delay, isTesting: isTesting)
     }
 
     private func formatStrategyMember(group: StrategyGroup, tag: String) -> StrategyMemberPresentation {
@@ -998,9 +1001,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         if isAuto {
             let winner = state.autoWinnerName()
             if let winner, !winner.isEmpty {
-                title = "♻️ 自动优选 ➔ \(NodeNameSanitizer.clean(winner))"
+                title = "自动优选 ➔ \(NodeNameSanitizer.clean(winner))"
             } else {
-                title = "♻️ 自动优选"
+                title = "自动优选"
             }
             var tip = "自动测速并分流至最低延迟节点"
             if let winner {
@@ -1154,8 +1157,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         for tag in group.members {
             let item = NSMenuItem()
             item.representedObject = ["group": group.tag, "tag": tag]
+            let isAuto = (tag == "auto")
+            let icon: NSImage? = {
+                if isAuto {
+                    return NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: "自动优选")
+                } else if tag == "direct" {
+                    return NSImage(systemSymbolName: "arrow.up.right", accessibilityDescription: "直连")
+                } else if tag == "reject" || tag == "block" {
+                    return NSImage(systemSymbolName: "nosign", accessibilityDescription: "阻断")
+                } else if AsterState.shared.group(tagged: tag) != nil {
+                    return NSImage(systemSymbolName: "square.stack.3d.up", accessibilityDescription: "策略组")
+                }
+                return nil
+            }()
             let view = StickyMenuItemView(
                 title: "",
+                icon: icon,
                 kind: .node(group: group.tag, tag: tag)
             ) { [weak self] in
                 self?.selectStrategyMember(groupTag: group.tag, tag: tag)
@@ -1197,10 +1214,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
     }
 
     private func nodeDelayText(delay: Int, tag: String, isTesting: Bool) -> String {
-        if isTesting { return "测速中…" }
-        if delay < 0 { return "超时" }
-        if delay == 0 { return "---" }
-        return "\(delay) ms"
+        LatencyFormatter.text(delayMs: delay, isTesting: isTesting)
     }
 
     // MARK: - 辅助方法：生成 12px 极细微圆角图标 (macOS 现代设计规范)
@@ -1273,7 +1287,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
 
     // MARK: - 菜单点击事件响应
     @objc func onOpenPreferences() {
-        showMainWindow()
+        showMainWindow(tab: .settings)
     }
 
     @objc func onRefreshAll() {
@@ -1303,11 +1317,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
     }
 
     @objc func onOpenDashboard() {
-        showMainWindow()
+        showMainWindow(tab: .control)
     }
 
     @objc func onOpenInspector() {
-        InspectorWindowController.shared.show()
+        showMainWindow(tab: .activity)
     }
 
     @objc func onCopyTerminalCommand() {
@@ -1402,12 +1416,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
             default:
                 break
             }
-        }
-    }
-
-    @objc func onSelectNode(_ sender: NSMenuItem) {
-        if let nodeId = sender.representedObject as? String {
-            AsterState.shared.selectNode(nodeId)
         }
     }
 

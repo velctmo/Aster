@@ -51,25 +51,6 @@ func Parse(raw string) (ParseResult, error) {
 	return ParseResult{}, fmt.Errorf("无法识别这份订阅。请改用 Clash YAML、sing-box JSON 或 vless:// 链接")
 }
 
-func FilterNodes(nodes []state.Node, exclude string) []state.Node {
-	exclude = strings.TrimSpace(exclude)
-	if exclude == "" {
-		return nodes
-	}
-	re, err := regexp.Compile(exclude)
-	if err != nil {
-		return nodes
-	}
-	out := make([]state.Node, 0, len(nodes))
-	for _, n := range nodes {
-		if re.MatchString(n.Name) {
-			continue
-		}
-		out = append(out, n)
-	}
-	return out
-}
-
 func looksJSON(s string) bool {
 	s = strings.TrimSpace(s)
 	return strings.HasPrefix(s, "{") || strings.HasPrefix(s, "[")
@@ -262,7 +243,7 @@ func clashToOutbound(p map[string]any, typ, tag string) (json.RawMessage, error)
 		m["method"] = str(p["cipher"])
 		m["password"] = str(p["password"])
 		if plugin := str(p["plugin"]); plugin != "" {
-			m["plugin"] = plugin
+			m["plugin"] = normalizeSSPlugin(plugin)
 			m["plugin_opts"] = pluginOpts(p["plugin-opts"])
 		}
 	case "trojan":
@@ -493,6 +474,8 @@ func ParseURI(line string) (state.Node, error) {
 		return tuicURI(u)
 	case "wireguard", "wg":
 		return wireguardURI(line, u)
+	case "shadowtls", "shadow-tls":
+		return shadowtlsURI(u)
 	default:
 		return state.Node{}, fmt.Errorf("unknown scheme")
 	}
@@ -609,7 +592,7 @@ func ssURI(line string) (state.Node, error) {
 	}
 	if plugin := u.Query().Get("plugin"); plugin != "" {
 		parts := strings.SplitN(plugin, ";", 2)
-		m["plugin"] = parts[0]
+		m["plugin"] = normalizeSSPlugin(parts[0])
 		if len(parts) > 1 {
 			m["plugin_opts"] = parts[1]
 		}
@@ -870,6 +853,50 @@ func hy2URI(u *url.URL) (state.Node, error) {
 	return state.Node{ID: state.NewID(), Name: name, Protocol: "hysteria2", Outbound: b}, nil
 }
 
+func shadowtlsURI(u *url.URL) (state.Node, error) {
+	q := u.Query()
+	name := first(u.Fragment, u.Hostname())
+	password := ""
+	if u.User != nil {
+		password = u.User.Username()
+		if p, ok := u.User.Password(); ok && password == "" {
+			password = p
+		}
+	}
+	if password == "" {
+		password = q.Get("password")
+	}
+	port := intVal(u.Port())
+	if port == 0 {
+		port = 443
+	}
+	ver := intVal(first(q.Get("version"), q.Get("ver")))
+	if ver == 0 {
+		ver = 3
+	}
+	tlsMap := map[string]any{
+		"enabled":     true,
+		"server_name": first(q.Get("sni"), q.Get("host"), q.Get("peer"), q.Get("servername"), u.Hostname()),
+	}
+	if q.Get("insecure") == "1" || strings.EqualFold(q.Get("insecure"), "true") || q.Get("allowInsecure") == "1" {
+		tlsMap["insecure"] = true
+	}
+	m := map[string]any{
+		"type":        "shadowtls",
+		"tag":         name,
+		"server":      u.Hostname(),
+		"server_port": port,
+		"password":    password,
+		"version":     ver,
+		"tls":         tlsMap,
+	}
+	if strict := q.Get("strict"); strict == "1" || strings.EqualFold(strict, "true") {
+		m["strict_mode"] = true
+	}
+	b, _ := json.Marshal(m)
+	return state.Node{ID: state.NewID(), Name: name, Protocol: "shadowtls", Outbound: b}, nil
+}
+
 func str(v any) string {
 	switch t := v.(type) {
 	case string:
@@ -935,6 +962,15 @@ func pluginOpts(v any) string {
 		return strings.Join(parts, ";")
 	default:
 		return str(v)
+	}
+}
+
+func normalizeSSPlugin(p string) string {
+	switch strings.ToLower(strings.TrimSpace(p)) {
+	case "obfs", "simple-obfs":
+		return "obfs-local"
+	default:
+		return strings.TrimSpace(p)
 	}
 }
 

@@ -55,6 +55,8 @@ type App struct {
 	cachedProcs         []ProcessTrafficStat
 	speedtestMu         sync.Mutex
 	diagnosticsMu       sync.Mutex
+	diagnosticsCond     *sync.Cond
+	diagnosticsRunning  bool
 	cachedDiagnostics   NetworkDiagnostics
 	cachedDiagnosticsAt time.Time
 	pending             bool
@@ -176,6 +178,7 @@ func New() (*App, error) {
 		startupGraceUntil: time.Now().Add(10 * time.Second),
 		lastNotifyTime:    make(map[string]time.Time),
 	}
+	a.diagnosticsCond = sync.NewCond(&a.diagnosticsMu)
 	return a, nil
 }
 
@@ -792,7 +795,7 @@ func (a *App) apply(f state.File, restart bool) error {
 			healthy := false
 			for time.Now().Before(deadline) {
 				if a.clash.Healthy() {
-					_ = a.clash.PatchMode(clashMode(f.Mode))
+					_ = a.clash.PatchMode(state.ClashMode(f.Mode))
 					if tag := a.selectableProxyMember(f.Selected); tag != "" {
 						_ = a.clash.Select("proxy", tag)
 					}
@@ -858,17 +861,6 @@ func (a *App) waitForStableCore() error {
 			return nil
 		}
 		time.Sleep(50 * time.Millisecond)
-	}
-}
-
-func clashMode(mode string) string {
-	switch mode {
-	case "global":
-		return "Global"
-	case "direct":
-		return "Direct"
-	default:
-		return "Rule"
 	}
 }
 
@@ -1151,6 +1143,9 @@ func (a *App) GetIPInfo(force bool) DualIPInfo {
 			}
 		}
 
+		if !useProxy {
+			return IPInfo{IP: "---", Country: "离线 / 未联网", City: "", ISP: "", FetchedAt: time.Now().Unix()}
+		}
 		return IPInfo{IP: "---", Country: "暂无出口代理", City: "", ISP: "", FetchedAt: time.Now().Unix()}
 	}
 
