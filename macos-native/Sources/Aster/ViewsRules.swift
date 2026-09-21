@@ -35,6 +35,14 @@ public struct RulesView: View {
         .init(\.priority, order: .reverse),
         .init(\.matchType, order: .forward)
     ]
+    // 规则判定模拟器 (Surge 旗舰级规则测试工具)
+    @State private var showEvaluator: Bool = true
+    @State private var evalTarget: String = ""
+    @State private var evalProcess: String = ""
+    @State private var evalPort: String = ""
+    @State private var isEvaluating: Bool = false
+    @State private var evalResult: RuleEvaluateResult? = nil
+    @State private var evalError: String? = nil
 
     @MainActor
     public init(state: AsterState? = nil) {
@@ -159,6 +167,19 @@ public struct RulesView: View {
                     }
 
                     Button(action: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            showEvaluator.toggle()
+                        }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "sparkle.magnifyingglass")
+                            Text(showEvaluator ? "收起判定器" : "规则判定器")
+                        }
+                    }
+                    .buttonStyle(.exquisiteSecondary(height: 28))
+                    .help("展开/收起 Surge 级网络路由规则模拟器")
+
+                    Button(action: {
                         addRuleContext = AddRuleContext.forCustom()
                     }) {
                         Label("添加规则", systemImage: "plus")
@@ -169,6 +190,11 @@ public struct RulesView: View {
             }
 
             Divider().opacity(0.4)
+
+            if showEvaluator {
+                ruleEvaluatorDeck
+                Divider().opacity(0.3)
+            }
 
             // 搜索与过滤工具栏
             HStack(spacing: 12) {
@@ -354,4 +380,188 @@ public struct RulesView: View {
         }()
         addRuleContext = AddRuleContext.forCustom(type: ruleType, value: rule.payload, action: rule.action.uppercased())
     }
+
+    // MARK: - 规则判定模拟器视图 (Surge 旗舰级规则测试工具)
+    @ViewBuilder
+    private var ruleEvaluatorDeck: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkle.magnifyingglass")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.accentColor)
+                Text("规则判定模拟器")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.primary)
+                Text("输入目标地址即可模拟全量分流规则匹配链")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+
+                Spacer()
+
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        showEvaluator = false
+                    }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("隐藏判定器")
+            }
+
+            HStack(spacing: 8) {
+                ExquisiteSearchField(
+                    placeholder: "输入待判定的域名 (如 apple.com)、IP (如 1.1.1.1) 或 Host…",
+                    text: $evalTarget,
+                    maxWidth: 420
+                )
+                .onSubmit {
+                    performEvaluation()
+                }
+
+                TextField("进程 (可选)", text: $evalProcess)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 110)
+                    .font(.system(size: 11.5))
+
+                TextField("端口", text: $evalPort)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 58)
+                    .font(.system(size: 11.5))
+
+                Button(action: performEvaluation) {
+                    HStack(spacing: 4) {
+                        if isEvaluating {
+                            ProgressView().controlSize(.mini).frame(width: 12, height: 12)
+                        } else {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 9))
+                        }
+                        Text("模拟判定")
+                    }
+                }
+                .buttonStyle(.exquisitePrimary)
+                .disabled(isEvaluating || evalTarget.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            if let res = evalResult {
+                HStack(spacing: 12) {
+                    // 命中状态
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(res.matched ? Color(red: 0.22, green: 0.72, blue: 0.48) : Color(red: 0.25, green: 0.55, blue: 0.95))
+                            .frame(width: 6, height: 6)
+                        Text(res.matched ? "命中规则" : "默认分流 (FINAL)")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(res.matched ? Color(red: 0.22, green: 0.72, blue: 0.48) : Color(red: 0.25, green: 0.55, blue: 0.95))
+                    }
+
+                    // 规则类型与匹配项
+                    if !res.ruleType.isEmpty {
+                        Text("\(res.ruleType): \(res.payload)")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                    }
+
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.secondary)
+
+                    // 执行策略胶囊
+                    ActionBadge(action: res.outbound)
+
+                    // 最终出站节点
+                    if !res.selectedNode.isEmpty && res.selectedNode != res.outbound {
+                        HStack(spacing: 4) {
+                            Image(systemName: "server.rack")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                            Text(NodeNameSanitizer.clean(res.selectedNode))
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.primary)
+                        }
+                    }
+
+                    Spacer()
+
+                    // 判定耗时
+                    Text(String(format: "%.2f ms", res.evaluationTimeMs))
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+
+                    // 在表格中联动高亮
+                    if let ruleId = selectedRuleId {
+                        Button {
+                            // Rule is already selected
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "scope")
+                                Text("已在列表中高亮")
+                            }
+                        }
+                        .font(.system(size: 10.5, weight: .medium))
+                        .buttonStyle(.plain)
+                        .foregroundColor(.accentColor)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.primary.opacity(0.035))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+                )
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            } else if let err = evalError {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.red)
+                    Text(err)
+                        .font(.system(size: 11))
+                        .foregroundColor(.red)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.red.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+        }
+        .asterCard(padding: 14)
+        .padding(.horizontal, 22)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+    }
+
+    private func performEvaluation() {
+        let target = evalTarget.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !target.isEmpty else { return }
+        isEvaluating = true
+        evalError = nil
+        evalResult = nil
+        let proc = evalProcess.trimmingCharacters(in: .whitespacesAndNewlines)
+        let processParam: String? = proc.isEmpty ? nil : proc
+        let portParam: Int? = Int(evalPort.trimmingCharacters(in: .whitespacesAndNewlines))
+        Task {
+            defer { isEvaluating = false }
+            do {
+                let res = try await state.evaluateRule(target: target, process: processParam, port: portParam, network: "tcp")
+                self.evalResult = res
+                if let matched = allRules.first(where: {
+                    $0.payload.localizedCaseInsensitiveContains(res.payload) ||
+                    res.payload.localizedCaseInsensitiveContains($0.payload)
+                }) {
+                    self.selectedRuleId = matched.id
+                }
+            } catch {
+                self.evalError = error.localizedDescription
+            }
+        }
+    }
 }
+

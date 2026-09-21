@@ -33,6 +33,7 @@ public struct SettingsView: View {
     @State private var isBackingUpWebDAV: Bool = false
     @State private var isRestoringWebDAV: Bool = false
     @State private var isClearingProxy: Bool = false
+    @State private var isFlushingDNS: Bool = false
 
     // 精致就地状态反馈指示 (InlineStatusPill)
     @State private var portStatus: InlineStatusKind? = nil
@@ -1031,6 +1032,27 @@ public struct SettingsView: View {
                         }
                         Spacer()
                         Button(action: {
+                            isFlushingDNS = true
+                            state.flushDNSCache()
+                            clearProxyStatus = .success("系统 DNS 缓存已成功刷新")
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                                isFlushingDNS = false
+                            }
+                        }) {
+                            HStack(spacing: 4) {
+                                if isFlushingDNS {
+                                    ProgressView().controlSize(.mini)
+                                } else {
+                                    Image(systemName: "bolt.horizontal.circle")
+                                }
+                                Text("刷新 DNS 缓存")
+                            }
+                        }
+                        .buttonStyle(.exquisiteSecondary(height: 28, cornerRadius: AsterMetrics.radiusControl))
+                        .disabled(isFlushingDNS)
+                        .help("即刻清空 macOS 本地 DNS 解析缓存 (dscacheutil -flushcache)")
+
+                        Button(action: {
                             isClearingProxy = true
                             clearProxyStatus = .loading("正在清理系统代理残留…")
                             Task {
@@ -1100,11 +1122,6 @@ public struct SettingsView: View {
 
 private extension View {
     func settingsCardStyle() -> some View {
-        self.padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            )
-            .nativeHairlineBorder(cornerRadius: AsterMetrics.radiusCard)
+        self.asterCard(cornerRadius: AsterMetrics.radiusCard, padding: 14)
     }
 }

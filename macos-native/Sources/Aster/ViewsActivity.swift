@@ -459,13 +459,7 @@ public struct ActivityDashboardView: View {
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(
-                    RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
-                        .fill(.ultraThinMaterial)
-                )
-                .overlay(
-                    NativeHairlineBorder(cornerRadius: AsterMetrics.radiusCard)
-                )
+                .asterCard(cornerRadius: AsterMetrics.radiusCard, padding: 0)
             } else {
                 HStack(alignment: .top, spacing: 12) {
                     VStack(spacing: 0) {
@@ -531,14 +525,8 @@ public struct ActivityDashboardView: View {
                             }
                         }
                     }
-                    .background(
-                        RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
-                            .fill(.ultraThinMaterial)
-                    )
-                    .overlay(
-                        NativeHairlineBorder(cornerRadius: AsterMetrics.radiusCard)
-                    )
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .asterCard(cornerRadius: AsterMetrics.radiusCard, padding: 0)
 
                     if let selected = selectedConnection {
                         let activeConn = filteredList.first(where: { $0.id == selected.id }) ?? state.connections.first(where: { $0.id == selected.id }) ?? selected
@@ -694,8 +682,16 @@ public struct LiveConnectionRow: View {
             let host = conn.metadata?.host ?? conn.metadata?.destinationIP ?? ""
             let target = conn.effectiveTarget
             Button("复制目标地址 (\(target))") {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(target, forType: .string)
+                ClipboardHelper.copy(target)
+            }
+            Button("复制 cURL 命令") {
+                let isTLS = conn.metadata?.destinationPort == "443" || conn.metadata?.destinationPort == "8443"
+                let scheme = isTLS ? "https" : "http"
+                ClipboardHelper.copy("curl -v \"\(scheme)://\(target)\"")
+            }
+            Divider()
+            Button("在独立审查窗口中打开…") {
+                InspectorWindowController.shared.show()
             }
             if !host.isEmpty {
                 Divider()
@@ -947,13 +943,7 @@ public struct RuleEvaluatorBar: View {
 
 private extension View {
     func activityCardStyle() -> some View {
-        self.background(
-            RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
-        .overlay(
-            NativeHairlineBorder(cornerRadius: AsterMetrics.radiusCard)
-        )
+        self.asterCard(cornerRadius: AsterMetrics.radiusCard, padding: 0)
     }
 }
 

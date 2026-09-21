@@ -293,16 +293,7 @@ public struct OutboundsView: View {
                 .contentShape(Rectangle())
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .background(
-            RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
-        .overlay(
-            NativeHairlineBorder(cornerRadius: AsterMetrics.radiusCard)
-        )
-        .shadow(color: Color.black.opacity(0.03), radius: 6, x: 0, y: 1.5)
+        .asterCard(cornerRadius: AsterMetrics.radiusCard, padding: 12)
         .padding(.horizontal, DesignTokens.pagePadding)
         .onAppear {
             if group.tag == state.status.selected || group.tag == "proxy" { expandedGroupTags.insert(group.tag) }

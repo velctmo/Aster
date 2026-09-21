@@ -155,6 +155,8 @@ public struct OverviewDashboardView: View {
 // MARK: - 英雄中枢命令甲板 (Hero Command Deck)
 public struct HeroCommandDeckView: View {
     @ObservedObject var state = AsterState.shared
+    @State private var isClearingProxy: Bool = false
+    @State private var clearProxyDone: Bool = false
 
     public init() {}
 
@@ -261,6 +263,30 @@ public struct HeroCommandDeckView: View {
                         .buttonStyle(.exquisiteSecondary(height: 28))
                         .help("重新启动 sing-box 内核并平滑重载配置")
 
+                        Button(action: {
+                            isClearingProxy = true
+                            Task {
+                                try? await state.clearSystemProxyResidue()
+                                clearProxyDone = true
+                                try? await Task.sleep(for: .seconds(2))
+                                clearProxyDone = false
+                                isClearingProxy = false
+                            }
+                        }) {
+                            HStack(spacing: 4) {
+                                if isClearingProxy {
+                                    ProgressView().controlSize(.mini).frame(width: 10, height: 10)
+                                } else {
+                                    Image(systemName: clearProxyDone ? "checkmark" : "shield.slash")
+                                        .font(.system(size: 10))
+                                }
+                                Text(clearProxyDone ? "已清理" : "清理代理")
+                                    .font(.system(size: 11.5, weight: .medium))
+                            }
+                        }
+                        .buttonStyle(.exquisiteSecondary(height: 28))
+                        .help("一键清除 macOS 系统网络中遗留的 HTTP/HTTPS 代理设置")
+
                         Button(action: { state.selectedTab = .nodes }) {
                             HStack(spacing: 5) {
                                 Image(systemName: "square.stack.3d.up")
@@ -332,15 +358,7 @@ public struct HeroCommandDeckView: View {
                 }
             }
         }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
-        .overlay(
-            NativeHairlineBorder(cornerRadius: AsterMetrics.radiusCard)
-        )
-        .shadow(color: Color.black.opacity(0.04), radius: 8, x: 0, y: 2)
+        .asterCard(cornerRadius: AsterMetrics.radiusCard, padding: 16)
     }
 }
 
@@ -425,14 +443,7 @@ public struct ThroughputMonitorCard: View {
             realtimeChart
                 .frame(height: 72)
         }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
-        .overlay(
-            NativeHairlineBorder(cornerRadius: AsterMetrics.radiusCard)
-        )
+        .asterCard(cornerRadius: AsterMetrics.radiusCard, padding: 14)
     }
 
     @ViewBuilder
@@ -595,15 +606,8 @@ public struct OverviewModuleCard<ActionContent: View>: View {
                 }
             }
         }
-        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
-                .fill(.ultraThinMaterial)
-        )
-        .overlay(
-            NativeHairlineBorder(cornerRadius: AsterMetrics.radiusCard)
-        )
+        .asterCard(cornerRadius: AsterMetrics.radiusCard, padding: 16)
     }
 }
 
@@ -782,15 +786,8 @@ public struct DualIPCard: View {
                     }
                 }
             }
-            .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            )
-            .overlay(
-                NativeHairlineBorder(cornerRadius: AsterMetrics.radiusCard)
-            )
+            .asterCard(cornerRadius: AsterMetrics.radiusCard, padding: 14)
 
             // B. 代理出口落地 IP 卡片 (右列)
             VStack(alignment: .leading, spacing: 8) {
@@ -872,15 +869,8 @@ public struct DualIPCard: View {
                     }
                 }
             }
-            .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            )
-            .overlay(
-                NativeHairlineBorder(cornerRadius: AsterMetrics.radiusCard)
-            )
+            .asterCard(cornerRadius: AsterMetrics.radiusCard, padding: 14)
         }
     }
 }

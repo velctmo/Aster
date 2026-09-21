@@ -1000,13 +1000,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
     }
 
     @objc func onFlushDNS() {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/dscacheutil")
-        task.arguments = ["-flushcache"]
-        try? task.run()
-        task.waitUntilExit()
-
-        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .default)
+        AsterState.shared.flushDNSCache()
     }
 
     // MARK: - 菜单点击事件响应

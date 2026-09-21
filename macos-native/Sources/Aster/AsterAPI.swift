@@ -1410,6 +1410,16 @@ public class AsterState: ObservableObject {
         refreshAll()
     }
 
+    // MARK: - 清空系统 DNS 缓存
+    public func flushDNSCache() {
+        triggerHaptic()
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/dscacheutil")
+        task.arguments = ["-flushcache"]
+        try? task.run()
+        task.waitUntilExit()
+    }
+
     // MARK: - 重启整个 Aster 应用程序
     public func relaunchApplication(restartDaemon: Bool = false) {
         triggerHaptic()

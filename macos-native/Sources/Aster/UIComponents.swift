@@ -421,6 +421,7 @@ public struct LatencyBadge: View {
                     .frame(width: 5.5, height: 5.5)
                 Text(LatencyFormatter.badgeText(delayMs: delayMs, isTesting: false))
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
+                    .monospacedDigit()
                     .foregroundStyle(badgeColor)
             }
         }
@@ -655,6 +656,48 @@ public struct ElevatedGlassCard<Content: View>: View {
                 x: 0,
                 y: 2
             )
+    }
+}
+
+// MARK: - 统一 Aster 原生卡片容器修饰器 (Apple HIG 精密实体质感)
+public struct AsterCardModifier: ViewModifier {
+    public var cornerRadius: CGFloat
+    public var padding: CGFloat
+    public var isInteractive: Bool
+    @Environment(\.colorScheme) private var colorScheme
+
+    public init(cornerRadius: CGFloat = AsterMetrics.radiusCard, padding: CGFloat = 16, isInteractive: Bool = false) {
+        self.cornerRadius = cornerRadius
+        self.padding = padding
+        self.isInteractive = isInteractive
+    }
+
+    public func body(content: Content) -> some View {
+        content
+            .padding(padding)
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(.ultraThinMaterial)
+            )
+            .overlay(
+                NativeHairlineBorder(cornerRadius: cornerRadius)
+            )
+            .shadow(
+                color: Color.black.opacity(colorScheme == .dark ? 0.22 : 0.035),
+                radius: isInteractive ? 8 : 4,
+                x: 0,
+                y: isInteractive ? 3 : 1
+            )
+    }
+}
+
+public extension View {
+    func asterCard(cornerRadius: CGFloat = AsterMetrics.radiusCard, padding: CGFloat = 16) -> some View {
+        modifier(AsterCardModifier(cornerRadius: cornerRadius, padding: padding, isInteractive: false))
+    }
+
+    func asterInteractiveCard(cornerRadius: CGFloat = AsterMetrics.radiusCard, padding: CGFloat = 16) -> some View {
+        modifier(AsterCardModifier(cornerRadius: cornerRadius, padding: padding, isInteractive: true))
     }
 }
 
