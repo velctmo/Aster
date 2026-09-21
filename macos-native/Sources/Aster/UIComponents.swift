@@ -549,20 +549,14 @@ public enum StrategyPresentation {
 }
 
 // MARK: - 原生微边框 (Native Hairline Border) 设计系统
-public struct NativeHairlineBorder: ViewModifier, View {
+public struct NativeHairlineBorder: View {
     @Environment(\.colorScheme) private var colorScheme
-    var cornerRadius: CGFloat
-    var lineWidth: CGFloat
+    public var cornerRadius: CGFloat
+    public var lineWidth: CGFloat
 
     public init(cornerRadius: CGFloat = AsterMetrics.radiusCard, lineWidth: CGFloat = 0.5) {
         self.cornerRadius = cornerRadius
         self.lineWidth = lineWidth
-    }
-
-    public func body(content: Content) -> some View {
-        content.overlay(
-            body
-        )
     }
 
     public var body: some View {
@@ -599,7 +593,7 @@ public struct LiquidGlassBevelBorder: View {
 
 public extension View {
     func nativeHairlineBorder(cornerRadius: CGFloat = AsterMetrics.radiusCard, lineWidth: CGFloat = 0.5) -> some View {
-        self.modifier(NativeHairlineBorder(cornerRadius: cornerRadius, lineWidth: lineWidth))
+        self.overlay(NativeHairlineBorder(cornerRadius: cornerRadius, lineWidth: lineWidth))
     }
 
     func liquidGlassBorder(cornerRadius: CGFloat = AsterMetrics.radiusCard, lineWidth: CGFloat = 0.5) -> some View {
