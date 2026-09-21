@@ -133,6 +133,18 @@ public struct ConfigProfileItem: Codable, Identifiable, Hashable, Sendable {
     public var inboundSummary: ImportedInboundSummary?
 }
 
+public struct ProfileContentResponse: Codable, Hashable, Sendable {
+    public let id: String
+    public let name: String
+    public let kind: String
+    public let content: String
+    public let format: String
+    public let path: String?
+    public let url: String?
+    public let nodeCount: Int
+    public let updatedAt: Int64
+}
+
 public struct ScriptItem: Codable, Identifiable, Hashable, Sendable {
     public var id: String
     public var name: String

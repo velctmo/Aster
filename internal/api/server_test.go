@@ -137,3 +137,66 @@ func TestEvaluateRule_QueryToken(t *testing.T) {
 	}
 }
 
+func TestGetConfigContent(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("ASTER_DATA_DIR", dir)
+	a, err := app.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := a.APIToken()
+
+	raw := `{"outbounds":[{"type":"direct","tag":"direct"},{"type":"shadowsocks","tag":"ss-node","server":"1.1.1.1","server_port":443,"method":"aes-128-gcm","password":"p"}]}`
+	if err := a.CreateSubscriptionProfile("API内容测试", "", raw); err != nil {
+		t.Fatal(err)
+	}
+	profiles := a.Store().Get().Profiles
+	var targetID string
+	for _, p := range profiles {
+		if p.Name == "API内容测试" {
+			targetID = p.ID
+			break
+		}
+	}
+	if targetID == "" {
+		t.Fatal("profile not found")
+	}
+
+	srv := &Server{App: a}
+	h := srv.Handler()
+
+	// Unauthorized
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/configs/"+targetID+"/content", nil)
+	rr := httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", rr.Code)
+	}
+
+	// 404 Not Found
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/configs/nonexistent/content", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", rr.Code)
+	}
+
+	// 200 OK
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/configs/"+targetID+"/content", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr = httptest.NewRecorder()
+	h.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d (body: %s)", rr.Code, rr.Body.String())
+	}
+
+	var res app.ProfileContentJSON
+	if err := json.Unmarshal(rr.Body.Bytes(), &res); err != nil {
+		t.Fatalf("failed to decode ProfileContentJSON: %v", err)
+	}
+	if res.ID != targetID || res.Format != "json" || res.NodeCount != 1 {
+		t.Fatalf("unexpected res: %+v", res)
+	}
+}
+

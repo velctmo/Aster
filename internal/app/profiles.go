@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -60,6 +61,9 @@ func (a *App) Profiles() []ProfileJSON {
 		n := len(p.ManualNodes)
 		for _, source := range p.Sources {
 			n += len(source.Nodes)
+		}
+		if p.Kind == state.ProfileKindSubscription && n == 0 && len(p.Config) > 0 {
+			n = len(render.ExtractNodesFromConfig(p.Config))
 		}
 		candidate := state.CloneFile(f)
 		candidate.ActiveConfigID = p.ID
@@ -524,6 +528,93 @@ func replaceProfileInFile(f *state.File, id string, profile state.ConfigProfile)
 		}
 	}
 	return false
+}
+
+// ProfileContentJSON exposes the inspectable concrete configuration content and file metadata.
+type ProfileContentJSON struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	Format    string `json:"format"`
+	Content   string `json:"content"`
+	Path      string `json:"path,omitempty"`
+	URL       string `json:"url,omitempty"`
+	NodeCount int    `json:"nodeCount"`
+	UpdatedAt int64  `json:"updatedAt"`
+}
+
+// ProfileContent returns the formatted/beautified configuration content and filesystem paths for inspection.
+func (a *App) ProfileContent(id string) (*ProfileContentJSON, error) {
+	f := a.st.Get()
+	var target *state.ConfigProfile
+	for i := range f.Profiles {
+		if f.Profiles[i].ID == id {
+			target = &f.Profiles[i]
+			break
+		}
+	}
+	if target == nil {
+		return nil, fmt.Errorf("配置不存在: %s", id)
+	}
+	nodeCount := len(target.ManualNodes)
+	for _, source := range target.Sources {
+		nodeCount += len(source.Nodes)
+	}
+	var sourceURL string
+	if target.Source != "" {
+		sourceURL = target.Source
+	} else if len(target.Sources) > 0 {
+		sourceURL = target.Sources[0].URL
+	}
+	format := "json"
+	var contentStr string
+	if target.Kind == state.ProfileKindSubscription {
+		if nodeCount == 0 && len(target.Config) > 0 {
+			nodeCount = len(render.ExtractNodesFromConfig(target.Config))
+		}
+		var pretty bytes.Buffer
+		if err := json.Indent(&pretty, target.Config, "", "  "); err == nil {
+			contentStr = pretty.String()
+		} else {
+			contentStr = string(target.Config)
+		}
+	} else {
+		candidate := state.CloneFile(f)
+		candidate.ActiveConfigID = target.ID
+		rendered, err := render.Config(candidate, a.st.Dir())
+		if err != nil {
+			return nil, fmt.Errorf("渲染配置失败: %w", err)
+		}
+		var pretty bytes.Buffer
+		if err := json.Indent(&pretty, rendered, "", "  "); err == nil {
+			contentStr = pretty.String()
+		} else {
+			contentStr = string(rendered)
+		}
+	}
+	filePath := filepath.Join(a.st.Dir(), "profiles", target.ID+".json")
+	if _, err := os.Stat(filePath); err != nil {
+		filePath = ""
+	}
+	configPath := a.st.ConfigPath()
+	if _, err := os.Stat(configPath); err != nil {
+		configPath = ""
+	}
+	path := filePath
+	if path == "" {
+		path = configPath
+	}
+	return &ProfileContentJSON{
+		ID:        target.ID,
+		Name:      target.Name,
+		Kind:      target.Kind,
+		Format:    format,
+		Content:   contentStr,
+		Path:      path,
+		URL:       sourceURL,
+		NodeCount: nodeCount,
+		UpdatedAt: target.UpdatedAt,
+	}, nil
 }
 
 func (a *App) RefreshAllProfiles() (int, error) {

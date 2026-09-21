@@ -55,6 +55,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /api/v1/capture", s.patchCapture)
 	mux.HandleFunc("PATCH /api/v1/mode", s.patchMode)
 	mux.HandleFunc("GET /api/v1/configs", s.getConfigs)
+	mux.HandleFunc("GET /api/v1/configs/{id}/content", s.getConfigContent)
 	mux.HandleFunc("POST /api/v1/configs", s.postConfig)
 	mux.HandleFunc("POST /api/v1/configs/refresh-all", s.refreshAllConfigs)
 	mux.HandleFunc("POST /api/v1/configs/{id}/activate", s.activateConfig)
@@ -323,6 +324,22 @@ func (s *Server) bindConfigScript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, s.App.Profiles())
+}
+
+func (s *Server) getConfigContent(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	content, err := s.App.ProfileContent(id)
+	if err != nil {
+		if strings.Contains(err.Error(), "不存在") {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, content)
 }
 
 func (s *Server) getScripts(w http.ResponseWriter, r *http.Request) {

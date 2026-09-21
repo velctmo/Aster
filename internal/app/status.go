@@ -223,7 +223,7 @@ func (a *App) DelayMany(tags []string) []map[string]any {
 // presentation and measurement model. When Clash API is available, it enriches
 // each group with its live active selection (Now).
 func (a *App) StrategyGroups() ([]render.Group, error) {
-	f := a.st.Active()
+	f := a.st.Get()
 	config, err := render.Config(f, a.st.Dir())
 	if err != nil {
 		return nil, err
@@ -403,7 +403,7 @@ func (a *App) LiveRules() []state.Rule {
 		configBytes, _ = os.ReadFile(a.st.ConfigPath())
 	}
 	if len(configBytes) == 0 {
-		configBytes, _ = render.Config(a.st.Active(), a.st.Dir())
+		configBytes, _ = render.Config(a.st.Get(), a.st.Dir())
 	}
 
 	seenItemKey := make(map[string]bool)
@@ -718,13 +718,14 @@ func capabilitiesFor(f state.File) CapabilitiesJSON {
 	if inbounds.Tun {
 		tunReason = "TUN 由完整配置自行管理，Aster 不提供开关"
 	}
-	readonly := CapabilityJSON{Reason: "完整订阅配置为严格只读"}
 	return CapabilitiesJSON{
 		SystemProxy: CapabilityJSON{Available: inbounds.SystemProxy, Reason: proxyReason},
 		// A TUN inbound in an imported configuration is observable, but it is
 		// never controllable by Aster under the strict read-only contract.
 		Tun:         CapabilityJSON{Available: false, Reason: tunReason},
-		NodeControl: readonly, RuleControl: readonly, Speedtest: readonly,
+		NodeControl: CapabilityJSON{Available: true},
+		RuleControl: CapabilityJSON{Available: false, Reason: "完整订阅规则由订阅自行管理"},
+		Speedtest:   CapabilityJSON{Available: true},
 	}
 }
 
@@ -831,11 +832,9 @@ func effectiveNodesKey(p state.ConfigProfile) string {
 }
 
 func (a *App) Nodes() []NodeJSON {
-	// Node presentation is always scoped to the unique active profile. Avoid
-	// cloning full subscription documents and every inactive node pool for a
-	// routine /nodes snapshot.
-	f := a.st.Active()
-	if p := f.ActiveProfile(); p != nil && p.Kind != state.ProfileKindNodes {
+	f := a.st.Get()
+	p := f.ActiveProfile()
+	if p == nil {
 		return nil
 	}
 	a.mu.Lock()
@@ -858,6 +857,20 @@ func (a *App) Nodes() []NodeJSON {
 				break
 			}
 		}
+	}
+	if p.Kind == state.ProfileKindSubscription {
+		rawConfig, err := render.Config(f, a.st.Dir())
+		if err == nil {
+			for _, ext := range render.ExtractNodesFromConfig(rawConfig) {
+				delay := delays[ext.Tag]
+				out = append(out, NodeJSON{
+					ID: ext.Tag, Tag: ext.Tag, Name: ext.Tag, Protocol: ext.Protocol,
+					SubID: p.ID, SubName: p.Name, Disabled: false, DelayMs: delay,
+					BandwidthMbps: bandwidths[ext.Tag],
+				})
+			}
+		}
+		return out
 	}
 	nodes, err := a.activeMergedNodes(f)
 	if err != nil {

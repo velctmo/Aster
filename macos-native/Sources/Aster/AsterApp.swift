@@ -329,10 +329,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
                 backing: .buffered,
                 defer: false
             )
-            // All primary pages remain usable without horizontal scrolling at
-            // this size.  The default size is intentionally larger, but the
-            // user must not be able to resize the window into a broken layout.
-            win.minSize = NSSize(width: 1_024, height: 700)
+            // 兼顾 MacBook 13" 屏幕原生半屏分屏 (Split View / Tile) 与全功能操作空间
+            win.minSize = NSSize(width: 840, height: 560)
             win.title = "Aster"
             win.titlebarAppearsTransparent = true
             win.titleVisibility = .hidden
@@ -363,6 +361,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuDele
         if NSApp.activationPolicy() != .regular {
             NSApp.setActivationPolicy(.regular)
         }
+    }
+
+    func windowWillResize(_ sender: NSWindow, to frameSize: NSSize) -> NSSize {
+        // 遵循 macOS 原生规范：由 minSize 严守物理底线，内部响应式自适应任意长宽比，
+        // 绝不强行锁死固定比例，避免拖拽单边时发生鼠标光标抖动抗衡与系统分屏破坏
+        let targetWidth = max(sender.minSize.width, frameSize.width)
+        let targetHeight = max(sender.minSize.height, frameSize.height)
+        return NSSize(width: targetWidth, height: targetHeight)
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {

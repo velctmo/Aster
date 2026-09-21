@@ -804,6 +804,21 @@ public class AsterState: ObservableObject {
         } catch {}
     }
 
+    public func fetchProfileContent(id: String) async throws -> ProfileContentResponse {
+        guard let url = apiURL("/api/v1/configs/\(id)/content") else {
+            throw URLError(.badURL)
+        }
+        let (data, response) = try await apiData(for: authorizedRequest(url: url))
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        guard (200...299).contains(http.statusCode) else {
+            let errorMsg = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+            throw NSError(domain: "Aster", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: errorMsg])
+        }
+        return try JSONDecoder().decode(ProfileContentResponse.self, from: data)
+    }
+
     public func fetchRules() async {
         guard let url = apiURL("/api/v1/rules") else { return }
         do {

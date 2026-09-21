@@ -80,9 +80,15 @@ public struct ProfilesView: View {
             // 主内容区分支展示
             if activeTab == .profiles {
                 if state.configs.isEmpty {
-                    Spacer()
-                    ContentUnavailableView("暂无配置", systemImage: "doc.badge.plus", description: Text("添加 sing-box 订阅、Clash 配置或组合节点"))
-                    Spacer()
+                    AsterEmptyState(
+                        icon: "doc.badge.plus",
+                        title: "暂无配置",
+                        subtitle: "添加 sing-box 订阅、Clash 配置或组合节点",
+                        actionTitle: "添加订阅"
+                    ) {
+                        showingAddSheet = true
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollView {
                         VStack(spacing: 12) {
@@ -115,6 +121,7 @@ public struct ConfigProfileCard: View {
     var onSwitchToOverrides: () -> Void
     @ObservedObject private var state = AsterState.shared
     @State private var isHovered = false
+    @State private var showingConfigViewer = false
 
     private var isUpdating: Bool {
         state.updatingConfigIds.contains(config.id) || state.isRefreshingAllConfigs
@@ -219,7 +226,17 @@ public struct ConfigProfileCard: View {
 
             // 右侧操作工具栏 (显式可点击，不再隐藏在右键)
             HStack(spacing: 8) {
-                // 1. 刷新订阅按钮
+                // 1. 查看配置文件 (Surge / Clash 核心功能)
+                Button(action: {
+                    showingConfigViewer = true
+                }) {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(.exquisiteSecondary(height: 26))
+                .help("查看底层配置文件全文及节点详情")
+
+                // 2. 刷新订阅按钮
                 Button(action: {
                     state.refreshConfig(id: config.id)
                 }) {
@@ -236,7 +253,7 @@ public struct ConfigProfileCard: View {
                 .disabled(isUpdating || state.isConfigMutationInFlight)
                 .help("刷新并拉取最新订阅")
 
-                // 2. 启用配置按钮 (未激活时直观可见)
+                // 3. 启用配置按钮 (未激活时直观可见)
                 if !config.active {
                     Button(action: {
                         state.activateConfig(id: config.id)
@@ -248,8 +265,16 @@ public struct ConfigProfileCard: View {
                     .help("激活并切换为此配置")
                 }
 
-                // 3. 更多选项菜单
+                // 4. 更多选项菜单
                 Menu {
+                    Button {
+                        showingConfigViewer = true
+                    } label: {
+                        Label("查看配置文件", systemImage: "doc.text.magnifyingglass")
+                    }
+
+                    Divider()
+
                     Menu {
                         Button {
                             bindScript(nil)
@@ -334,6 +359,14 @@ public struct ConfigProfileCard: View {
         }
         .onHover { isHovered = $0 }
         .contextMenu {
+            Button {
+                showingConfigViewer = true
+            } label: {
+                Label("查看配置文件", systemImage: "doc.text.magnifyingglass")
+            }
+
+            Divider()
+
             if !config.active {
                 Button {
                     state.activateConfig(id: config.id)
@@ -402,6 +435,9 @@ public struct ConfigProfileCard: View {
             } label: {
                 Label("删除配置", systemImage: "trash")
             }
+        }
+        .sheet(isPresented: $showingConfigViewer) {
+            ProfileConfigViewerSheet(profile: config)
         }
     }
 
@@ -555,47 +591,23 @@ public struct AddSubscriptionSheet: View {
                 Spacer()
             }
 
-            // 模式切换器：高质感三合一药丸选择器
-            HStack(spacing: 4) {
+            // 模式切换器：统一选项胶囊
+            HStack(spacing: 8) {
                 ForEach(ImportMode.allCases, id: \.self) { mode in
-                    Button {
+                    SelectionCapsule(
+                        title: mode.title,
+                        icon: mode.icon,
+                        isSelected: importMode == mode,
+                        tintColor: .accentColor
+                    ) {
                         withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
                             importMode = mode
                             errorMessage = nil
                         }
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: mode.icon)
-                                .font(.system(size: 11.5, weight: importMode == mode ? .semibold : .regular))
-                            Text(mode.title)
-                                .font(.system(size: 11.5, weight: importMode == mode ? .semibold : .medium))
-                        }
-                        .foregroundColor(importMode == mode ? .primary : .secondary)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .frame(maxWidth: .infinity)
-                        .background(
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .fill(importMode == mode ? Color.primary.opacity(0.08) : Color.clear)
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .stroke(importMode == mode ? Color.primary.opacity(0.12) : Color.clear, lineWidth: 0.8)
-                        )
                     }
-                    .buttonStyle(.plain)
                     .disabled(submitting)
                 }
             }
-            .padding(3)
-            .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(Color.primary.opacity(0.035))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .stroke(Color.primary.opacity(0.06), lineWidth: 0.8)
-            )
 
             // 模式主体区域
             Group {
@@ -657,15 +669,7 @@ public struct AddSubscriptionSheet: View {
                 .toggleStyle(.checkbox)
                 .disabled(submitting)
             }
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
-                    .fill(Color.primary.opacity(0.02))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
-                    .stroke(Color.primary.opacity(0.06), lineWidth: 0.8)
-            )
+            .asterSubcard(padding: 12)
 
             // 进度条
             if submitting {
@@ -723,6 +727,7 @@ public struct AddSubscriptionSheet: View {
         }
         .padding(22)
         .frame(width: 540)
+        .unifiedWindowBackdrop(material: .popover, hasHairlineBorder: true)
     }
 
     // MARK: - 子视图: 单订阅托管
@@ -1104,3 +1109,365 @@ public struct AddSubscriptionSheet: View {
 }
 
 public typealias AddConfigSheet = AddSubscriptionSheet
+
+// MARK: - 原生高性能代码阅读器组件 (基于 NSTextView)
+public struct CodeTextViewRepresentable: NSViewRepresentable {
+    public let text: String
+
+    public init(text: String) {
+        self.text = text
+    }
+
+    public func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSTextView.scrollableTextView()
+        guard let textView = scrollView.documentView as? NSTextView else {
+            return scrollView
+        }
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular)
+        textView.textColor = NSColor.textColor
+        textView.backgroundColor = NSColor.textBackgroundColor
+        textView.drawsBackground = true
+        textView.isRichText = false
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.string = text
+        scrollView.drawsBackground = true
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
+        scrollView.autohidesScrollers = true
+        return scrollView
+    }
+
+    public func updateNSView(_ nsView: NSScrollView, context: Context) {
+        if let textView = nsView.documentView as? NSTextView, textView.string != text {
+            textView.string = text
+        }
+    }
+}
+
+// MARK: - 配置文件检视器模态 (借鉴 Surge / Clash 配置文件检视体验)
+public struct ProfileConfigViewerSheet: View {
+    let profile: ConfigProfileItem
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var state = AsterState.shared
+
+    @State private var contentResponse: ProfileContentResponse? = nil
+    @State private var isLoading = true
+    @State private var errorMessage: String? = nil
+    @State private var searchText = ""
+    @State private var viewMode: ConfigViewMode = .full
+
+    public enum ConfigViewMode: String, CaseIterable {
+        case full = "全文查看"
+        case filtered = "过滤匹配行"
+    }
+
+    private var rawContent: String {
+        contentResponse?.content ?? ""
+    }
+
+    private var filteredLines: [(lineNum: Int, line: String)] {
+        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+        let query = searchText.lowercased()
+        let lines = rawContent.components(separatedBy: .newlines)
+        var result: [(Int, String)] = []
+        for (idx, line) in lines.enumerated() {
+            if line.lowercased().contains(query) {
+                result.append((idx + 1, line))
+            }
+        }
+        return result
+    }
+
+    private var matchCount: Int {
+        if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return 0 }
+        return filteredLines.count
+    }
+
+    public var body: some View {
+        VStack(spacing: 0) {
+            // Header Bar
+            headerBar
+            Divider().opacity(0.3)
+
+            // Info & Toolbar
+            metadataBar
+            Divider().opacity(0.2)
+
+            // Content Area
+            contentArea
+            Divider().opacity(0.3)
+
+            // Footer Bar
+            footerBar
+        }
+        .frame(minWidth: 720, idealWidth: 820, minHeight: 520, idealHeight: 620)
+        .unifiedWindowBackdrop(material: .underWindowBackground, hasHairlineBorder: true)
+        .task {
+            await loadContent()
+        }
+    }
+
+    @ViewBuilder
+    private var headerBar: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color.blue.opacity(0.12))
+                    .frame(width: 34, height: 34)
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.blue)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 8) {
+                    Text(profile.name)
+                        .font(.system(size: 14, weight: .bold))
+                    Text(contentResponse?.format.uppercased() ?? "CONFIG")
+                        .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.blue.opacity(0.12))
+                        .foregroundColor(.blue)
+                        .clipShape(Capsule())
+                    if let kind = contentResponse?.kind {
+                        Text(kind == "subscription" ? "完整订阅" : (kind == "nodes" ? "节点聚合" : "本地配置"))
+                            .font(.system(size: 9.5, weight: .medium))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.1))
+                            .foregroundColor(.secondary)
+                            .clipShape(Capsule())
+                    }
+                }
+                Text("实时底层配置文件与节点映射结构")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            Button("完成") {
+                dismiss()
+            }
+            .buttonStyle(.exquisitePrimary(height: 28, cornerRadius: AsterMetrics.radiusControl))
+            .keyboardShortcut(.cancelAction)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+    }
+
+    @ViewBuilder
+    private var metadataBar: some View {
+        HStack(spacing: 12) {
+            ExquisiteSearchField(placeholder: "搜索配置内容 (如 outbound, port, 节点名)…", text: $searchText, maxWidth: 300)
+
+            if !searchText.isEmpty {
+                HStack(spacing: 6) {
+                    Text("\(matchCount) 处匹配")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(matchCount > 0 ? .accentColor : .secondary)
+
+                    Picker("", selection: $viewMode) {
+                        ForEach(ConfigViewMode.allCases, id: \.self) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 150)
+                }
+            }
+
+            Spacer()
+
+            if let count = contentResponse?.nodeCount, count > 0 {
+                HStack(spacing: 4) {
+                    Image(systemName: "point.3.filled.connected.trianglepath")
+                        .font(.system(size: 10))
+                        .foregroundColor(.green)
+                    Text("\(count) 节点")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            if let path = contentResponse?.path, !path.isEmpty {
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                } label: {
+                    Label("在 Finder 中显示", systemImage: "folder")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .buttonStyle(.exquisiteSecondary(height: 24, cornerRadius: AsterMetrics.radiusControl))
+                .help(path)
+            }
+
+            Button {
+                exportConfigFile()
+            } label: {
+                Label("导出…", systemImage: "square.and.arrow.up")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .buttonStyle(.exquisiteSecondary(height: 24, cornerRadius: AsterMetrics.radiusControl))
+            .disabled(rawContent.isEmpty)
+            .help("导出配置文件备份到本地磁盘")
+
+            ExquisiteCopyButton(text: rawContent, title: "复制全文", copiedTitle: "已复制", height: 24)
+                .disabled(rawContent.isEmpty)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.3))
+    }
+
+    @ViewBuilder
+    private var contentArea: some View {
+        if isLoading {
+            VStack(spacing: 12) {
+                Spacer()
+                ProgressView().controlSize(.regular)
+                Text("正在加载配置文件…")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let error = errorMessage {
+            VStack(spacing: 12) {
+                Spacer()
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 32))
+                    .foregroundColor(.red)
+                Text("读取配置失败")
+                    .font(.system(size: 13, weight: .bold))
+                Text(error)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                Button("重试") {
+                    Task { await loadContent() }
+                }
+                .buttonStyle(.exquisiteSecondary)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if rawContent.isEmpty {
+            VStack(spacing: 8) {
+                Spacer()
+                Text("配置内容为空")
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if !searchText.isEmpty && viewMode == .filtered {
+            filteredListView
+        } else {
+            CodeTextViewRepresentable(text: rawContent)
+                .background(Color(NSColor.textBackgroundColor))
+        }
+    }
+
+    @ViewBuilder
+    private var filteredListView: some View {
+        if filteredLines.isEmpty {
+            VStack(spacing: 8) {
+                Spacer()
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 24))
+                    .foregroundColor(.secondary.opacity(0.5))
+                Text("无匹配行")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(filteredLines, id: \.lineNum) { item in
+                        HStack(alignment: .top, spacing: 12) {
+                            Text("\(item.lineNum)")
+                                .font(.system(size: 11, weight: .regular, design: .monospaced))
+                                .foregroundColor(.secondary.opacity(0.6))
+                                .frame(width: 44, alignment: .trailing)
+                            Text(item.line)
+                                .font(.system(size: 11.5, weight: .regular, design: .monospaced))
+                                .foregroundColor(.primary)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(.vertical, 2)
+                        .padding(.horizontal, 10)
+                        .background(Color.primary.opacity(0.02))
+                        .cornerRadius(3)
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var footerBar: some View {
+        HStack(spacing: 12) {
+            if let path = contentResponse?.path, !path.isEmpty {
+                Image(systemName: "doc.plaintext")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Text(path)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } else if let url = contentResponse?.url, !url.isEmpty {
+                Image(systemName: "link")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Text(url)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer()
+
+            let totalLines = rawContent.components(separatedBy: .newlines).count
+            Text("\(totalLines) 行 · \(rawContent.utf8.count) 字节")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    private func loadContent() async {
+        isLoading = true
+        errorMessage = nil
+        do {
+            contentResponse = try await state.fetchProfileContent(id: profile.id)
+            isLoading = false
+        } catch {
+            errorMessage = error.localizedDescription
+            isLoading = false
+        }
+    }
+
+    private func exportConfigFile() {
+        guard !rawContent.isEmpty else { return }
+        let savePanel = NSSavePanel()
+        savePanel.canCreateDirectories = true
+        let ext = (contentResponse?.format ?? "json").lowercased()
+        savePanel.nameFieldStringValue = "\(profile.name).\(ext)"
+        if let utType = UTType(filenameExtension: ext) {
+            savePanel.allowedContentTypes = [utType]
+        }
+        if savePanel.runModal() == .OK, let targetURL = savePanel.url {
+            try? rawContent.write(to: targetURL, atomically: true, encoding: .utf8)
+        }
+    }
+}

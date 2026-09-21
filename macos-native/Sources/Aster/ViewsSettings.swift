@@ -1095,33 +1095,20 @@ public struct SettingsView: View {
         }
     }
 
-    // MARK: - 标准 macOS 风格设置行组件 (左对齐文字 + 右侧原生 Switch 开关)
+    // MARK: - 标准 macOS 风格设置行组件 (统一接入公共组件 SettingSwitchRow)
     private func settingSwitchRow(title: String, subtitle: String, isOn: Binding<Bool>, isEnabled: Bool = true, disabledReason: String? = nil) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundColor(.primary)
-                Text(subtitle)
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 16)
-
-            Toggle("", isOn: isOn)
-                .toggleStyle(.switch)
-                .labelsHidden()
-                .disabled(!isEnabled)
-                .help(disabledReason ?? title)
-        }
-        .opacity(isEnabled ? 1 : 0.55)
+        SettingSwitchRow(
+            title: title,
+            subtitle: subtitle,
+            isOn: isOn,
+            isEnabled: isEnabled,
+            disabledReason: disabledReason
+        )
     }
 }
 
 private extension View {
     func settingsCardStyle() -> some View {
-        self.asterCard(cornerRadius: AsterMetrics.radiusCard, padding: 14)
+        self.asterSettingsCard()
     }
 }

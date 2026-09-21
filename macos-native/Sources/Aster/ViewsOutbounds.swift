@@ -9,8 +9,7 @@ public struct OutboundsView: View {
     @State private var sortOption: NodeSortOption = .defaultOrder
     @State private var searchText = ""
     @State private var selectedSourceID = "all"
-    @State private var expandedGroupTags: Set<String> = []
-    @State private var didAutoExpandGroups = false
+    @State private var collapsedGroupTags: Set<String> = []
 
     public enum NodeSortOption: String, CaseIterable {
         case defaultOrder = "默认顺序"
@@ -90,8 +89,8 @@ public struct OutboundsView: View {
 
     @ViewBuilder
     private var headerActions: some View {
-        HStack(spacing: 10) {
-            ExquisiteSearchField(placeholder: "搜索节点…", text: $searchText, maxWidth: 190)
+        HStack(spacing: 8) {
+            ExquisiteSearchField(placeholder: "搜索节点…", text: $searchText, maxWidth: 160)
 
             if !sourceOptions.isEmpty {
                 Picker("来源", selection: $selectedSourceID) {
@@ -101,7 +100,7 @@ public struct OutboundsView: View {
                     }
                 }
                 .labelsHidden()
-                .frame(maxWidth: 150)
+                .frame(maxWidth: 130)
             }
 
             Picker("排序", selection: $sortOption) {
@@ -110,24 +109,21 @@ public struct OutboundsView: View {
                 }
             }
             .pickerStyle(.segmented)
-            .frame(maxWidth: 220)
+            .frame(maxWidth: 180)
 
             Button(action: {
-                // 点击全量测速时，自动展开所有包含叶子节点的策略组，让用户直接看到测速动态
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                    for g in state.visibleStrategyGroups {
-                        expandedGroupTags.insert(g.tag)
-                    }
+                    collapsedGroupTags.removeAll()
                 }
                 state.testAllNodes() 
             }) {
-                HStack(spacing: 5) {
+                HStack(spacing: 4) {
                     if state.isTestingDelays {
                         ProgressView().controlSize(.mini).frame(width: 12, height: 12)
-                        Text("正在全量测速…")
+                        Text("测速中…")
                     } else {
                         Image(systemName: "bolt.fill")
-                        Text("测速全部策略组")
+                        Text("测速全部")
                     }
                 }
             }
@@ -141,29 +137,12 @@ public struct OutboundsView: View {
 
     @ViewBuilder
     private var emptyState: some View {
-        VStack(spacing: 12) {
-            Spacer()
-            Image(systemName: "network.slash")
-                .font(.system(size: 36))
-                .foregroundColor(.secondary.opacity(0.4))
-            Text("暂无可用节点")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(.secondary)
-            Text("请先在「配置」中添加订阅或导入节点")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-            Spacer()
-        }
+        AsterEmptyState(
+            icon: "network.slash",
+            title: "暂无可用节点",
+            subtitle: "请先在「配置」中添加订阅或导入节点"
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func autoExpandGroupsIfNeeded() {
-        let groups = state.visibleStrategyGroups
-        guard !groups.isEmpty, !didAutoExpandGroups else { return }
-        for group in groups {
-            expandedGroupTags.insert(group.tag)
-        }
-        didAutoExpandGroups = true
     }
 
     @ViewBuilder
@@ -179,13 +158,18 @@ public struct OutboundsView: View {
         .scrollIndicators(.hidden)
     }
 
-
     @ViewBuilder
     private func strategyGroupSection(_ group: StrategyGroup) -> some View {
         let isGroupTesting = state.isTestingGroup(group)
         let expanded = Binding(
-            get: { expandedGroupTags.contains(group.tag) },
-            set: { value in if value { expandedGroupTags.insert(group.tag) } else { expandedGroupTags.remove(group.tag) } }
+            get: { !collapsedGroupTags.contains(group.tag) },
+            set: { isExp in
+                if isExp {
+                    collapsedGroupTags.remove(group.tag)
+                } else {
+                    collapsedGroupTags.insert(group.tag)
+                }
+            }
         )
 
         let currentLabel = state.selectedLabel(in: group)
@@ -276,7 +260,7 @@ public struct OutboundsView: View {
 
                     Button {
                         _ = withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                            expandedGroupTags.insert(group.tag)
+                            collapsedGroupTags.remove(group.tag)
                         }
                         state.testStrategyGroup(group)
                     } label: {
@@ -295,13 +279,10 @@ public struct OutboundsView: View {
         }
         .asterCard(cornerRadius: AsterMetrics.radiusCard, padding: 12)
         .padding(.horizontal, DesignTokens.pagePadding)
-        .onAppear {
-            if group.tag == state.status.selected || group.tag == "proxy" { expandedGroupTags.insert(group.tag) }
-        }
         .onChange(of: isGroupTesting) { _, testing in
             if testing {
                 _ = withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                    expandedGroupTags.insert(group.tag)
+                    collapsedGroupTags.remove(group.tag)
                 }
             }
         }
@@ -352,23 +333,13 @@ public struct OutboundsView: View {
                 nodesGrid
             }
         }
-        .disabled(!(state.status.capabilities?.nodeControl.available ?? true))
         .onAppear {
             if sortNodesByDelay {
                 sortOption = .lowestDelay
             }
-            autoExpandGroupsIfNeeded()
             Task {
                 await state.fetchStrategyGroups()
-                autoExpandGroupsIfNeeded()
             }
-        }
-        .onChange(of: state.strategyGroups.map(\.tag)) { _, _ in
-            autoExpandGroupsIfNeeded()
-        }
-        .onChange(of: state.status.activeConfigId) { _, _ in
-            didAutoExpandGroups = false
-            autoExpandGroupsIfNeeded()
         }
         .onChange(of: sortOption) { _, newVal in
             sortNodesByDelay = (newVal == .lowestDelay)

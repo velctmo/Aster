@@ -61,6 +61,7 @@ public struct PageHeader<Trailing: View>: View {
             Text(title)
                 .font(.title2.bold())
                 .foregroundStyle(.primary)
+                .fixedSize(horizontal: true, vertical: false)
             Spacer(minLength: 8)
             trailing()
         }
@@ -145,6 +146,73 @@ public struct VisualEffectView: NSViewRepresentable {
         nsView.material = material
         nsView.blendingMode = blendingMode
         nsView.state = state
+    }
+}
+
+// MARK: - 统一原生毛玻璃窗口背景修饰器 (彻底杜绝安全区穿透与红绿灯横栏透明 Bug)
+public struct UnifiedWindowBackdrop: ViewModifier {
+    public var material: NSVisualEffectView.Material
+    public var blendingMode: NSVisualEffectView.BlendingMode
+    public var state: NSVisualEffectView.State
+    public var hasHairlineBorder: Bool
+    public var cornerRadius: CGFloat
+
+    public init(
+        material: NSVisualEffectView.Material = .popover,
+        blendingMode: NSVisualEffectView.BlendingMode = .behindWindow,
+        state: NSVisualEffectView.State = .active,
+        hasHairlineBorder: Bool = false,
+        cornerRadius: CGFloat = AsterMetrics.radiusCard
+    ) {
+        self.material = material
+        self.blendingMode = blendingMode
+        self.state = state
+        self.hasHairlineBorder = hasHairlineBorder
+        self.cornerRadius = cornerRadius
+    }
+
+    public func body(content: Content) -> some View {
+        ZStack {
+            // 1. 全局底层毛玻璃 (强制 ignoresSafeArea 覆盖包括标题栏在内的 100% 物理像素)
+            VisualEffectView(material: material, blendingMode: blendingMode, state: state)
+                .ignoresSafeArea()
+
+            // 2. 主体内容 (自然尊重安全区或自由定位)
+            content
+
+            // 3. 可选连续曲率发丝微边框
+            if hasHairlineBorder {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+            }
+        }
+    }
+}
+
+public extension View {
+    /// 统一原生窗口/模态弹窗毛玻璃基座
+    /// - Parameters:
+    ///   - material: 毛玻璃材质，模态弹窗推荐 `.popover`，主工作视窗推荐 `.underWindowBackground`，侧边栏推荐 `.sidebar`
+    ///   - blendingMode: 混合模式，默认 `.behindWindow` 透出系统壁纸
+    ///   - state: 激活态，默认 `.active`
+    ///   - hasHairlineBorder: 是否绘制精致的 0.5pt 外边缘发丝边框
+    ///   - cornerRadius: 连续曲率圆角半径，默认 `AsterMetrics.radiusCard` (12pt)
+    func unifiedWindowBackdrop(
+        material: NSVisualEffectView.Material = .popover,
+        blendingMode: NSVisualEffectView.BlendingMode = .behindWindow,
+        state: NSVisualEffectView.State = .active,
+        hasHairlineBorder: Bool = false,
+        cornerRadius: CGFloat = AsterMetrics.radiusCard
+    ) -> some View {
+        self.modifier(UnifiedWindowBackdrop(
+            material: material,
+            blendingMode: blendingMode,
+            state: state,
+            hasHairlineBorder: hasHairlineBorder,
+            cornerRadius: cornerRadius
+        ))
     }
 }
 
@@ -698,6 +766,10 @@ public extension View {
 
     func asterInteractiveCard(cornerRadius: CGFloat = AsterMetrics.radiusCard, padding: CGFloat = 16) -> some View {
         modifier(AsterCardModifier(cornerRadius: cornerRadius, padding: padding, isInteractive: true))
+    }
+
+    func asterSettingsCard(cornerRadius: CGFloat = AsterMetrics.radiusCard, padding: CGFloat = 14) -> some View {
+        asterCard(cornerRadius: cornerRadius, padding: padding)
     }
 }
 
@@ -1749,5 +1821,344 @@ public struct InlineStatusPill: View {
         case .info: return .blue
         case .loading: return .secondary
         }
+    }
+}
+
+// MARK: - 统一二级子卡片容器 (AsterSubcard)
+public struct AsterSubcardModifier: ViewModifier {
+    public var cornerRadius: CGFloat
+    public var padding: CGFloat
+
+    public init(cornerRadius: CGFloat = AsterMetrics.radiusCard, padding: CGFloat = 12) {
+        self.cornerRadius = cornerRadius
+        self.padding = padding
+    }
+
+    public func body(content: Content) -> some View {
+        content
+            .padding(padding)
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(Color(NSColor.controlBackgroundColor).opacity(0.45))
+            )
+            .overlay(
+                NativeHairlineBorder(cornerRadius: cornerRadius)
+            )
+    }
+}
+
+public extension View {
+    /// 统一二级子卡片修饰器
+    func asterSubcard(cornerRadius: CGFloat = AsterMetrics.radiusCard, padding: CGFloat = 12) -> some View {
+        self.modifier(AsterSubcardModifier(cornerRadius: cornerRadius, padding: padding))
+    }
+}
+
+public struct AsterSubcard<Content: View>: View {
+    public var cornerRadius: CGFloat
+    public var padding: CGFloat
+    @ViewBuilder public var content: () -> Content
+
+    public init(
+        cornerRadius: CGFloat = AsterMetrics.radiusCard,
+        padding: CGFloat = 12,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.cornerRadius = cornerRadius
+        self.padding = padding
+        self.content = content
+    }
+
+    public var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            content()
+        }
+        .asterSubcard(cornerRadius: cornerRadius, padding: padding)
+    }
+}
+
+// MARK: - 统一空状态组件 (AsterEmptyState)
+public struct AsterEmptyState: View {
+    public var icon: String
+    public var title: String
+    public var subtitle: String?
+    public var actionTitle: String?
+    public var action: (() -> Void)?
+
+    public init(
+        icon: String = "tray",
+        title: String,
+        subtitle: String? = nil,
+        actionTitle: String? = nil,
+        action: (() -> Void)? = nil
+    ) {
+        self.icon = icon
+        self.title = title
+        self.subtitle = subtitle
+        self.actionTitle = actionTitle
+        self.action = action
+    }
+
+    public var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 28))
+                .foregroundColor(.secondary.opacity(0.45))
+                .padding(.bottom, 2)
+
+            Text(title)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.primary.opacity(0.85))
+
+            if let sub = subtitle, !sub.isEmpty {
+                Text(sub)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 320)
+            }
+
+            if let actTitle = actionTitle, let act = action {
+                Button(action: act) {
+                    Text(actTitle)
+                }
+                .buttonStyle(.exquisitePrimary(height: 26, cornerRadius: AsterMetrics.radiusControl))
+                .padding(.top, 6)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 24)
+    }
+}
+
+// MARK: - 统一轻量提示/报警横幅 (InfoNoticeBanner)
+public enum NoticeBannerStyle {
+    case info
+    case success
+    case warning
+    case error
+    case neutral
+
+    public var icon: String {
+        switch self {
+        case .info: return "info.circle.fill"
+        case .success: return "checkmark.circle.fill"
+        case .warning: return "exclamationmark.triangle.fill"
+        case .error: return "xmark.circle.fill"
+        case .neutral: return "info.circle"
+        }
+    }
+
+    public var tintColor: Color {
+        switch self {
+        case .info: return .blue
+        case .success: return .green
+        case .warning: return .orange
+        case .error: return .red
+        case .neutral: return .secondary
+        }
+    }
+}
+
+public struct InfoNoticeBanner: View {
+    public var text: String
+    public var icon: String?
+    public var style: NoticeBannerStyle
+    public var trailingText: String?
+    public var onDismiss: (() -> Void)?
+
+    public init(
+        text: String,
+        icon: String? = nil,
+        style: NoticeBannerStyle = .info,
+        trailingText: String? = nil,
+        onDismiss: (() -> Void)? = nil
+    ) {
+        self.text = text
+        self.icon = icon
+        self.style = style
+        self.trailingText = trailingText
+        self.onDismiss = onDismiss
+    }
+
+    public var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: icon ?? style.icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(style.tintColor)
+
+            Text(text)
+                .font(.system(size: 11))
+                .foregroundColor(.primary.opacity(0.85))
+                .lineLimit(2)
+
+            Spacer()
+
+            if let trailing = trailingText {
+                Text(trailing)
+                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                    .foregroundColor(.secondary)
+            }
+
+            if let dismiss = onDismiss {
+                Button(action: dismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(style.tintColor.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(style.tintColor.opacity(0.18), lineWidth: 0.5)
+        )
+    }
+}
+
+// MARK: - 统一选项胶囊按键 (SelectionCapsule)
+public struct SelectionCapsule: View {
+    public var title: String
+    public var icon: String?
+    public var isSelected: Bool
+    public var tintColor: Color
+    public var action: () -> Void
+
+    public init(
+        title: String,
+        icon: String? = nil,
+        isSelected: Bool,
+        tintColor: Color = .accentColor,
+        action: @escaping () -> Void
+    ) {
+        self.title = title
+        self.icon = icon
+        self.isSelected = isSelected
+        self.tintColor = tintColor
+        self.action = action
+    }
+
+    public var body: some View {
+        Button(action: {
+            ClipboardHelper.hapticSelection()
+            action()
+        }) {
+            HStack(spacing: 4) {
+                if let ic = icon {
+                    Image(systemName: ic)
+                        .font(.system(size: 10, weight: isSelected ? .bold : .medium))
+                }
+                Text(title)
+                    .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: AsterMetrics.radiusControl, style: .continuous)
+                    .fill(isSelected ? tintColor.opacity(0.15) : Color.primary.opacity(0.04))
+            )
+            .foregroundColor(isSelected ? tintColor : .secondary)
+            .overlay(
+                RoundedRectangle(cornerRadius: AsterMetrics.radiusControl, style: .continuous)
+                    .strokeBorder(isSelected ? tintColor.opacity(0.6) : Color.primary.opacity(0.06), lineWidth: 0.6)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - 标准 macOS 风格设置开关行组件 (SettingSwitchRow)
+public struct SettingSwitchRow: View {
+    public var title: String
+    public var subtitle: String
+    @Binding public var isOn: Bool
+    public var isEnabled: Bool
+    public var disabledReason: String?
+
+    public init(
+        title: String,
+        subtitle: String,
+        isOn: Binding<Bool>,
+        isEnabled: Bool = true,
+        disabledReason: String? = nil
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self._isOn = isOn
+        self.isEnabled = isEnabled
+        self.disabledReason = disabledReason
+    }
+
+    public var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .foregroundColor(.primary)
+                Text(subtitle)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 16)
+
+            Toggle("", isOn: $isOn)
+                .toggleStyle(.switch)
+                .labelsHidden()
+                .disabled(!isEnabled)
+                .help(disabledReason ?? title)
+        }
+        .opacity(isEnabled ? 1 : 0.55)
+    }
+}
+
+// MARK: - 标准剪贴板带触觉复制按键 (ExquisiteCopyButton)
+public struct ExquisiteCopyButton: View {
+    public var text: String
+    public var title: String
+    public var copiedTitle: String
+    public var height: CGFloat
+
+    @State private var copied: Bool = false
+
+    public init(
+        text: String,
+        title: String = "复制",
+        copiedTitle: String = "已复制",
+        height: CGFloat = 24
+    ) {
+        self.text = text
+        self.title = title
+        self.copiedTitle = copiedTitle
+        self.height = height
+    }
+
+    public var body: some View {
+        Button(action: {
+            ClipboardHelper.copy(text)
+            withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {
+                copied = true
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                withAnimation {
+                    copied = false
+                }
+            }
+        }) {
+            HStack(spacing: 4) {
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 9.5, weight: .semibold))
+                Text(copied ? copiedTitle : title)
+                    .font(.system(size: 11, weight: .medium))
+            }
+        }
+        .buttonStyle(.exquisiteSecondary(height: height, cornerRadius: AsterMetrics.radiusControl))
+        .disabled(text.isEmpty)
     }
 }

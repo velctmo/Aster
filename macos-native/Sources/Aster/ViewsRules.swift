@@ -223,16 +223,11 @@ public struct RulesView: View {
 
             // 原生 Table 数据表格 (IDE 代码编辑器质感)
             if visibleRules.isEmpty {
-                VStack(spacing: 12) {
-                    Spacer()
-                    Image(systemName: "line.3.horizontal.decrease.circle")
-                        .font(.system(size: 38))
-                        .foregroundStyle(.secondary.opacity(0.4))
-                    Text(searchText.isEmpty ? "暂无匹配规则" : "未找到包含「\(searchText)」的规则")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
+                AsterEmptyState(
+                    icon: "line.3.horizontal.decrease.circle",
+                    title: searchText.isEmpty ? "暂无匹配规则" : "未找到包含「\(searchText)」的规则",
+                    subtitle: searchText.isEmpty ? "当前激活配置未定义分流规则或规则集正在加载" : "尝试更换搜索关键字或清除过滤条件"
+                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 Table(visibleRules, selection: $selectedRuleId, sortOrder: $sortOrder) {
@@ -415,7 +410,7 @@ public struct RulesView: View {
                 ExquisiteSearchField(
                     placeholder: "输入待判定的域名 (如 apple.com)、IP (如 1.1.1.1) 或 Host…",
                     text: $evalTarget,
-                    maxWidth: 420
+                    maxWidth: .infinity
                 )
                 .onSubmit {
                     performEvaluation()
@@ -423,7 +418,7 @@ public struct RulesView: View {
 
                 TextField("进程 (可选)", text: $evalProcess)
                     .textFieldStyle(.roundedBorder)
-                    .frame(width: 110)
+                    .frame(width: 100)
                     .font(.system(size: 11.5))
 
                 TextField("端口", text: $evalPort)

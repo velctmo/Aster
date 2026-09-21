@@ -1010,3 +1010,58 @@ proxies:
 		t.Fatal("sing-box profile not found")
 	}
 }
+
+func TestProfileContent(t *testing.T) {
+	t.Setenv("ASTER_DATA_DIR", t.TempDir())
+	a, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := `{"outbounds":[{"type":"shadowsocks","tag":"ss-node","server":"1.2.3.4","server_port":8388,"method":"aes-128-gcm","password":"pwd"},{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}`
+	if err := a.CreateSubscriptionProfile("完整配置内容测试", "", raw); err != nil {
+		t.Fatal(err)
+	}
+	profiles := a.Store().Get().Profiles
+	var subID string
+	for _, p := range profiles {
+		if p.Name == "完整配置内容测试" {
+			subID = p.ID
+			break
+		}
+	}
+	if subID == "" {
+		t.Fatal("profile not found")
+	}
+
+	content, err := a.ProfileContent(subID)
+	if err != nil {
+		t.Fatalf("ProfileContent error: %v", err)
+	}
+	if content.ID != subID || content.Format != "json" {
+		t.Fatalf("unexpected content meta: %+v", content)
+	}
+	if !strings.Contains(content.Content, `"tag": "ss-node"`) {
+		t.Fatalf("content missing ss-node: %s", content.Content)
+	}
+	if content.NodeCount != 1 {
+		t.Fatalf("expected nodeCount=1, got %d", content.NodeCount)
+	}
+
+	// Activate and check Nodes()
+	if err := a.ActivateProfile(subID); err != nil {
+		t.Fatalf("ActivateProfile error: %v", err)
+	}
+	nodes := a.Nodes()
+	foundSS := false
+	for _, n := range nodes {
+		if n.Tag == "ss-node" {
+			foundSS = true
+			if n.Protocol != "shadowsocks" {
+				t.Fatalf("expected protocol shadowsocks, got %s", n.Protocol)
+			}
+		}
+	}
+	if !foundSS {
+		t.Fatalf("expected ss-node in Nodes(), got: %+v", nodes)
+	}
+}

@@ -103,7 +103,7 @@ public struct ActivityDashboardView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity)
-        .activityCardStyle()
+        .asterCard(cornerRadius: AsterMetrics.radiusCard, padding: 0)
     }
 
     // Col 1: 网络与当前生效模式
@@ -448,16 +448,11 @@ public struct ActivityDashboardView: View {
 
             // 连接数据大表与抽屉联动
             if filteredList.isEmpty {
-                VStack(spacing: 8) {
-                    Spacer()
-                    Image(systemName: state.status.running ? "waveform.path.ecg" : "network.slash")
-                        .font(.system(size: 28))
-                        .foregroundColor(.secondary.opacity(0.4))
-                    Text(state.status.running ? (state.activityFilterText.isEmpty ? "暂无活跃网络长连接 · 内核正在持续监听流量" : "无匹配的网络连接记录") : "代理内核未运行")
-                        .font(.system(size: 12.5))
-                        .foregroundColor(.secondary)
-                    Spacer()
-                }
+                AsterEmptyState(
+                    icon: state.status.running ? "waveform.path.ecg" : "network.slash",
+                    title: state.status.running ? (state.activityFilterText.isEmpty ? "暂无活跃网络长连接" : "无匹配的网络连接记录") : "代理内核未运行",
+                    subtitle: state.status.running && state.activityFilterText.isEmpty ? "内核正在持续监听网络流量并捕获连接" : nil
+                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .asterCard(cornerRadius: AsterMetrics.radiusCard, padding: 0)
             } else {
@@ -609,6 +604,7 @@ public struct LiveConnectionRow: View {
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(.primary.opacity(0.9))
                     .lineLimit(1)
+                    .truncationMode(.middle)
             }
             .frame(minWidth: 120, maxWidth: .infinity, alignment: .leading)
 
@@ -900,50 +896,23 @@ public struct RuleEvaluatorBar: View {
     }
 
     private func unhitNotice(_ result: RuleEvaluateResult) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "info.circle.fill")
-                .font(.system(size: 11.5))
-                .foregroundColor(.secondary)
-            Text("未命中任何显式规则 · 降级走默认出站策略：")
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-            ActionBadge(action: result.outbound.isEmpty ? "DIRECT" : result.outbound)
-            if !result.selectedNode.isEmpty {
-                Text("(\(result.selectedNode))")
-                    .font(.system(size: 10.5))
-                    .foregroundColor(.secondary)
-            }
-            Spacer()
-            Text(String(format: "%.1fms", result.evaluationTimeMs))
-                .font(.system(size: 10, weight: .medium, design: .monospaced))
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color.primary.opacity(0.03))
-        .clipShape(.rect(cornerRadius: 6))
+        let action = result.outbound.isEmpty ? "DIRECT" : result.outbound
+        let node = result.selectedNode.isEmpty ? "" : " (\(result.selectedNode))"
+        let timing = String(format: "%.1fms", result.evaluationTimeMs)
+        return InfoNoticeBanner(
+            text: "未命中任何显式规则 · 降级走默认出站策略：\(action)\(node)",
+            icon: "info.circle.fill",
+            style: .neutral,
+            trailingText: timing
+        )
     }
 
     private func errorNotice(_ error: String) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 11))
-                .foregroundColor(.orange)
-            Text("规则仿真异常: \(error)")
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-            Spacer()
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color.orange.opacity(0.08))
-        .clipShape(.rect(cornerRadius: 6))
-    }
-}
-
-private extension View {
-    func activityCardStyle() -> some View {
-        self.asterCard(cornerRadius: AsterMetrics.radiusCard, padding: 0)
+        InfoNoticeBanner(
+            text: "规则仿真异常: \(error)",
+            icon: "exclamationmark.triangle.fill",
+            style: .warning
+        )
     }
 }
 

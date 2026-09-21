@@ -20,7 +20,7 @@ public class InspectorWindowController: NSObject, NSWindowDelegate {
                 backing: .buffered,
                 defer: false
             )
-            win.minSize = NSSize(width: 980, height: 600)
+            win.minSize = NSSize(width: 860, height: 540)
             win.title = "请求日志"
             win.titlebarAppearsTransparent = true
             win.titleVisibility = .hidden
@@ -296,7 +296,7 @@ public struct SurgeProLogsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(VisualEffectView(material: .underWindowBackground, blendingMode: .behindWindow))
         }
-        .ignoresSafeArea()
+        .unifiedWindowBackdrop(material: .underWindowBackground)
         .frame(minWidth: 960, minHeight: 600)
         .onAppear {
             guard loadsRealtimeData else { return }

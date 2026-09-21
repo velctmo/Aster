@@ -11,7 +11,7 @@ public struct MainWindowView: View {
 
     public var body: some View {
         GeometryReader { proxy in
-            let compactSidebar = proxy.size.width < 860
+            let compactSidebar = proxy.size.width < 960
             ZStack {
                 // 全局底层材质基座 (彻底消除红绿灯/顶栏等无视图区域完全透明穿透的 Bug)
                 VisualEffectView(material: .sidebar, blendingMode: .behindWindow)

@@ -41,24 +41,15 @@ public struct OverridesManagementView: View {
                 Divider().opacity(0.3)
 
                 if state.scripts.isEmpty {
-                    VStack(spacing: 12) {
-                        Spacer()
-                        Image(systemName: "curlybraces")
-                            .font(.system(size: 32))
-                            .foregroundColor(.secondary.opacity(0.5))
-                        Text("暂无覆写脚本")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.secondary)
-                        Text("点击右上角 + 创建您的第一个覆写规则")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary.opacity(0.8))
-                        Button("新建脚本") {
-                            showingNewSheet = true
-                        }
-                        .buttonStyle(.exquisitePrimary(height: 28, cornerRadius: AsterMetrics.radiusControl))
-                        Spacer()
+                    AsterEmptyState(
+                        icon: "curlybraces",
+                        title: "暂无覆写脚本",
+                        subtitle: "点击右上角 + 或下方按钮创建您的第一个覆写规则",
+                        actionTitle: "新建脚本"
+                    ) {
+                        showingNewSheet = true
                     }
-                    .padding(20)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List(selection: $selectedScriptId) {
                         ForEach(filteredScripts) { script in
@@ -390,14 +381,7 @@ public struct ScriptDetailEditorView: View {
                     .toggleStyle(.checkbox)
                     .font(.system(size: 12))
                 }
-                .padding(14)
-                .background(
-                    RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
-                        .fill(Color(NSColor.controlBackgroundColor).opacity(0.4))
-                )
-                .overlay(
-                    NativeHairlineBorder(cornerRadius: AsterMetrics.radiusCard)
-                )
+                .asterSubcard(padding: 14)
 
                 // 2. sing-box 原生特性与协议增强
                 VStack(alignment: .leading, spacing: 10) {
@@ -422,14 +406,7 @@ public struct ScriptDetailEditorView: View {
                     .toggleStyle(.checkbox)
                     .font(.system(size: 12))
                 }
-                .padding(14)
-                .background(
-                    RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
-                        .fill(Color(NSColor.controlBackgroundColor).opacity(0.4))
-                )
-                .overlay(
-                    NativeHairlineBorder(cornerRadius: AsterMetrics.radiusCard)
-                )
+                .asterSubcard(padding: 14)
 
                 // 3. 常用业务分流预设 (基于二进制 .srs 规则集)
                 VStack(alignment: .leading, spacing: 10) {
@@ -454,14 +431,7 @@ public struct ScriptDetailEditorView: View {
                     .toggleStyle(.checkbox)
                     .font(.system(size: 12))
                 }
-                .padding(14)
-                .background(
-                    RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
-                        .fill(Color(NSColor.controlBackgroundColor).opacity(0.4))
-                )
-                .overlay(
-                    NativeHairlineBorder(cornerRadius: AsterMetrics.radiusCard)
-                )
+                .asterSubcard(padding: 14)
 
                 // 4. 动态自定义策略组构建区
                 VStack(alignment: .leading, spacing: 10) {
@@ -483,19 +453,12 @@ public struct ScriptDetailEditorView: View {
                         .foregroundColor(.secondary)
 
                     if customGroups.isEmpty {
-                        HStack {
-                            Spacer()
-                            VStack(spacing: 6) {
-                                Image(systemName: "square.stack.3d.up")
-                                    .font(.system(size: 24))
-                                    .foregroundColor(.secondary.opacity(0.4))
-                                Text("点击右上角「添加策略组」自由构建出站策略")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding(.vertical, 16)
-                            Spacer()
-                        }
+                        AsterEmptyState(
+                            icon: "square.stack.3d.up",
+                            title: "暂无自定义策略组",
+                            subtitle: "点击右上角「添加策略组」自由构建出站策略"
+                        )
+                        .padding(.vertical, 8)
                     } else {
                         VStack(spacing: 8) {
                             ForEach($customGroups) { $group in
@@ -531,14 +494,7 @@ public struct ScriptDetailEditorView: View {
                         }
                     }
                 }
-                .padding(14)
-                .background(
-                    RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
-                        .fill(Color(NSColor.controlBackgroundColor).opacity(0.4))
-                )
-                .overlay(
-                    NativeHairlineBorder(cornerRadius: AsterMetrics.radiusCard)
-                )
+                .asterSubcard(padding: 14)
 
                 // 5. 动态分流规则构建区
                 VStack(alignment: .leading, spacing: 10) {
@@ -560,19 +516,12 @@ public struct ScriptDetailEditorView: View {
                         .foregroundColor(.secondary)
 
                     if customRules.isEmpty {
-                        HStack {
-                            Spacer()
-                            VStack(spacing: 6) {
-                                Image(systemName: "arrow.triangle.branch")
-                                    .font(.system(size: 24))
-                                    .foregroundColor(.secondary.opacity(0.4))
-                                Text("点击右上角「添加分流规则」指派域名或 IP 出口")
-                                    .font(.system(size: 11))
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding(.vertical, 16)
-                            Spacer()
-                        }
+                        AsterEmptyState(
+                            icon: "arrow.triangle.branch",
+                            title: "暂无自定义分流规则",
+                            subtitle: "点击右上角「添加分流规则」指派域名或 IP 出口"
+                        )
+                        .padding(.vertical, 8)
                     } else {
                         VStack(spacing: 8) {
                             ForEach($customRules) { $rule in
@@ -622,14 +571,7 @@ public struct ScriptDetailEditorView: View {
                         }
                     }
                 }
-                .padding(14)
-                .background(
-                    RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
-                        .fill(Color(NSColor.controlBackgroundColor).opacity(0.4))
-                )
-                .overlay(
-                    NativeHairlineBorder(cornerRadius: AsterMetrics.radiusCard)
-                )
+                .asterSubcard(padding: 14)
 
                 // 底部操作：编译为代码
                 HStack {
@@ -1005,24 +947,14 @@ public struct NewScriptSheet: View {
                     .textFieldStyle(.roundedBorder)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 4) {
-                    Image(systemName: "info.circle.fill")
-                        .foregroundColor(.accentColor)
-                        .font(.system(size: 11))
-                    Text("说明:").font(.system(size: 11, weight: .semibold)).foregroundColor(.secondary)
-                }
-                Text("创建后将生成干净标准的 main 入口骨架。你可以直接在代码编辑器中编写 JavaScript 脚本，或随时在「表单构建器」中通过点击「+ 添加策略组」「+ 添加分流规则」自由可视化组装。")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(10)
-            .background(Color.accentColor.opacity(0.06))
-            .cornerRadius(6)
+            InfoNoticeBanner(
+                text: "创建后将生成干净标准的 main 入口骨架。你可以直接在代码编辑器中编写 JavaScript 脚本，或随时在「表单构建器」中通过点击「+ 添加策略组」「+ 添加分流规则」自由可视化组装。",
+                icon: "info.circle.fill",
+                style: .info
+            )
 
             if let errorMessage {
-                Text(errorMessage).font(.system(size: 11)).foregroundColor(.red)
+                InfoNoticeBanner(text: errorMessage, icon: "exclamationmark.triangle.fill", style: .error)
             }
 
             HStack(spacing: 12) {
@@ -1038,6 +970,7 @@ public struct NewScriptSheet: View {
         }
         .padding(22)
         .frame(width: 420)
+        .unifiedWindowBackdrop(material: .popover, hasHairlineBorder: true)
     }
 
     @MainActor
