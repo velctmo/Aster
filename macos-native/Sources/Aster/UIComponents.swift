@@ -549,7 +549,7 @@ public enum StrategyPresentation {
 }
 
 // MARK: - 原生微边框 (Native Hairline Border) 设计系统
-public struct NativeHairlineBorder: ViewModifier {
+public struct NativeHairlineBorder: ViewModifier, View {
     @Environment(\.colorScheme) private var colorScheme
     var cornerRadius: CGFloat
     var lineWidth: CGFloat
@@ -561,14 +561,18 @@ public struct NativeHairlineBorder: ViewModifier {
 
     public func body(content: Content) -> some View {
         content.overlay(
-            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                .strokeBorder(
-                    colorScheme == .dark
-                        ? Color.white.opacity(0.12)
-                        : Color.black.opacity(0.08),
-                    lineWidth: lineWidth
-                )
+            body
         )
+    }
+
+    public var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .strokeBorder(
+                colorScheme == .dark
+                    ? Color.white.opacity(0.12)
+                    : Color.black.opacity(0.08),
+                lineWidth: lineWidth
+            )
     }
 }
 

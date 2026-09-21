@@ -908,7 +908,7 @@ public struct AddSubscriptionSheet: View {
                 }
             }
             .frame(height: 108)
-            .onDrop(of: [UTType.fileURL], isTargeted: &isDropTargeted) { providers in
+            .onDrop(of: [UTType.fileURL], isTargeted: $isDropTargeted) { providers in
                 handleDrop(providers: providers)
             }
         }

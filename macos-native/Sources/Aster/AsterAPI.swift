@@ -985,26 +985,7 @@ public class AsterState: ObservableObject {
                         }
                     }
                     
-                    // 测速汇总统计：不针对任何单个节点报错，仅计算整体可用率与最优节点
-                    let testedNodes = self.nodes.filter { tags.contains($0.tag) }
-                    let totalCount = testedNodes.count
-                    let availableNodes = testedNodes.filter { $0.delayMs > 0 }
-                    let timeoutNodes = testedNodes.filter { $0.delayMs <= 0 }
-                    let availableCount = availableNodes.count
-                    let timeoutCount = timeoutNodes.count
 
-                    let summary: String
-                    let isSuccess: Bool
-                    if let best = availableNodes.min(by: { $0.delayMs < $1.delayMs }) {
-                        summary = "共测速 \(totalCount) 个节点：\(availableCount) 可用，\(timeoutCount) 超时。最优: \(best.name) (\(best.delayMs)ms)"
-                        isSuccess = true
-                    } else if totalCount > 0 {
-                        summary = "共测速 \(totalCount) 个节点：全部超时"
-                        isSuccess = false
-                    } else {
-                        summary = "暂无可测速节点"
-                        isSuccess = false
-                    }
 
                 }
             } catch {

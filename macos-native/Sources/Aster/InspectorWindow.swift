@@ -658,8 +658,9 @@ public struct SurgeProLogsView: View {
             ExquisiteSearchField(
                 placeholder: "搜索域名、应用、设备或规则",
                 text: $searchText,
-                width: 220
+                maxWidth: 220
             )
+            .frame(width: 220)
 
             // 规则测试 切换按钮
             Button(action: {
@@ -1207,6 +1208,7 @@ public struct SurgeProLogsView: View {
         let proto = detectProtocol(conn)
         let targetHost = conn.metadata?.host ?? "--"
         let destIP = conn.metadata?.destinationIP ?? "--"
+        let destPort = conn.metadata?.destinationPort ?? "--"
         let rawSrcIP = conn.metadata?.sourceIP?.trimmingCharacters(in: .whitespaces) ?? ""
         let srcIP = rawSrcIP.isEmpty ? "本机" : rawSrcIP
         let policyStr = conn.chains?.last ?? "DIRECT"
