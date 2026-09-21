@@ -488,7 +488,7 @@ public struct RulesView: View {
                         .foregroundColor(.secondary)
 
                     // 在表格中联动高亮
-                    if let ruleId = selectedRuleId {
+                    if selectedRuleId != nil {
                         Button {
                             // Rule is already selected
                         } label: {

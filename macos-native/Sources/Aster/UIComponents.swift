@@ -363,6 +363,10 @@ public enum ClipboardHelper {
         guard !text.isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+        hapticSelection()
+    }
+
+    public static func hapticSelection() {
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .default)
     }
 }
