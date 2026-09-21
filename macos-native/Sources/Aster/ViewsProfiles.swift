@@ -966,13 +966,14 @@ public struct AddSubscriptionSheet: View {
         }
     }
 
+    @MainActor
     private func submit() {
         submitting = true
         errorMessage = nil
         progressValue = 0.2
         progressStage = "正在准备解析配置数据…"
 
-        Task {
+        Task { @MainActor in
             do {
                 let createdConfig: ConfigProfileItem
                 if let existingID = createdConfigID {
@@ -984,10 +985,8 @@ public struct AddSubscriptionSheet: View {
                         )
                     }
                     createdConfig = existingConfig
-                    await MainActor.run {
-                        progressValue = 0.7
-                        progressStage = "正在重试挂载覆写脚本…"
-                    }
+                    progressValue = 0.7
+                    progressStage = "正在重试挂载覆写脚本…"
                 } else {
                     var finalName = name.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -1009,10 +1008,8 @@ public struct AddSubscriptionSheet: View {
                             }
                         }
 
-                        await MainActor.run {
-                            progressValue = 0.5
-                            progressStage = "正在向订阅端拉取数据并校验规则…"
-                        }
+                        progressValue = 0.5
+                        progressStage = "正在向订阅端拉取数据并校验规则…"
 
                         createdConfig = try await state.createConfigAndReturn(
                             name: finalName,
@@ -1033,10 +1030,8 @@ public struct AddSubscriptionSheet: View {
                             finalName = "节点订阅聚合"
                         }
 
-                        await MainActor.run {
-                            progressValue = 0.5
-                            progressStage = "正在并发抓取多源订阅并提取有效节点…"
-                        }
+                        progressValue = 0.5
+                        progressStage = "正在并发抓取多源订阅并提取有效节点…"
 
                         createdConfig = try await state.createConfigAndReturn(
                             name: finalName,
@@ -1062,10 +1057,8 @@ public struct AddSubscriptionSheet: View {
                             }
                         }
 
-                        await MainActor.run {
-                            progressValue = 0.5
-                            progressStage = "正在解析并进行内核规则校验…"
-                        }
+                        progressValue = 0.5
+                        progressStage = "正在解析并进行内核规则校验…"
 
                         createdConfig = try await state.createConfigAndReturn(
                             name: finalName,
@@ -1082,10 +1075,8 @@ public struct AddSubscriptionSheet: View {
 
                 // 如果指定了覆写脚本，进行绑定
                 if !selectedScriptId.isEmpty {
-                    await MainActor.run {
-                        progressValue = 0.8
-                        progressStage = "正在挂载覆写脚本…"
-                    }
+                    progressValue = 0.8
+                    progressStage = "正在挂载覆写脚本…"
                     do {
                         try await state.bindScript(profileId: createdConfig.id, scriptId: selectedScriptId)
                     } catch {
@@ -1097,22 +1088,16 @@ public struct AddSubscriptionSheet: View {
                     }
                 }
 
-                await MainActor.run {
-                    progressValue = 1.0
-                    progressStage = activateImmediately ? "配置已生效！" : "配置添加成功！"
-                    createdConfigID = nil
-                }
+                progressValue = 1.0
+                progressStage = activateImmediately ? "配置已生效！" : "配置添加成功！"
+                createdConfigID = nil
                 try? await Task.sleep(for: .milliseconds(300))
-                await MainActor.run {
-                    isPresented = false
-                }
+                isPresented = false
             } catch {
-                await MainActor.run {
-                    errorMessage = error.localizedDescription
-                    submitting = false
-                    progressValue = 0.0
-                    progressStage = ""
-                }
+                errorMessage = error.localizedDescription
+                submitting = false
+                progressValue = 0.0
+                progressStage = ""
             }
         }
     }

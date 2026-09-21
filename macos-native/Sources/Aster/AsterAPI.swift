@@ -2406,7 +2406,8 @@ private struct LogEventPayload: Codable {
 }
 
 // MARK: - AsterAPIClient
-public final class AsterAPIClient: Sendable {
+@MainActor
+public final class AsterAPIClient {
     public static let shared = AsterAPIClient()
 
     public init() {}

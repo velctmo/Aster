@@ -83,12 +83,13 @@ public struct SettingsView: View {
         }
     }
 
+    @MainActor
     private func syncFromBackendSettings() {
         mixedPortInput = "\(state.status.mixedPort ?? 6780)"
-        Task {
+        Task { @MainActor in
             await state.fetchSettings()
-            await MainActor.run {
-                if let p = state.status.mixedPort, p > 0 { mixedPortInput = "\(p)" }
+            if let p = state.status.mixedPort, p > 0 {
+                mixedPortInput = "\(p)"
             }
         }
     }

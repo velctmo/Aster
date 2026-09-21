@@ -82,8 +82,14 @@ else
   if ! xcodebuild -project macos-native/Aster.xcodeproj -scheme Aster -configuration Release \
     -destination 'platform=macOS,arch=arm64' \
     -derivedDataPath build/DerivedData CODE_SIGNING_ALLOWED=NO build >"$XCODE_LOG" 2>&1; then
-    echo "错误: xcodebuild 编译失败。日志末尾：" >&2
-    tail -n 80 "$XCODE_LOG" >&2 || true
+    echo "==================================================" >&2
+    echo "❌ 错误: xcodebuild 编译失败！" >&2
+    echo "==================================================" >&2
+    echo "▶ 关键编译器错误提取 (error:):" >&2
+    grep -E "(error:|fatal error:)" "$XCODE_LOG" | head -n 50 >&2 || true
+    echo "==================================================" >&2
+    echo "▶ 日志末尾 100 行:" >&2
+    tail -n 100 "$XCODE_LOG" >&2 || true
     exit 1
   fi
   BUILT_APP=$(find build/DerivedData -name 'Aster.app' -type d | head -1 || true)

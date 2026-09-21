@@ -584,7 +584,7 @@ public struct ActivityDashboardView: View {
 
 // MARK: - 实时长连接行组件 (克制配色、专业降噪排版)
 public struct LiveConnectionRow: View {
-    private let state = AsterState.shared
+    @ObservedObject private var state = AsterState.shared
     public var conn: ConnectionItem
     public var isSelected: Bool
     public var onSelect: () -> Void
@@ -732,7 +732,7 @@ public struct LiveConnectionRow: View {
 
 // MARK: - 嵌入式规则即时仿真测试条
 public struct RuleEvaluatorBar: View {
-    private let state = AsterState.shared
+    @ObservedObject private var state = AsterState.shared
     @State private var targetInput: String = ""
     @State private var isEvaluating: Bool = false
     @State private var evalResult: RuleEvaluateResult? = nil
@@ -817,6 +817,7 @@ public struct RuleEvaluatorBar: View {
         )
     }
 
+    @MainActor
     private func performEvaluation() {
         let trimmed = targetInput.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -824,19 +825,15 @@ public struct RuleEvaluatorBar: View {
         isEvaluating = true
         errorMessage = nil
 
-        Task {
+        Task { @MainActor in
             do {
                 let res = try await state.evaluateRule(target: trimmed)
-                await MainActor.run {
-                    self.evalResult = res
-                    self.isEvaluating = false
-                }
+                self.evalResult = res
+                self.isEvaluating = false
             } catch {
-                await MainActor.run {
-                    self.errorMessage = error.localizedDescription
-                    self.evalResult = nil
-                    self.isEvaluating = false
-                }
+                self.errorMessage = error.localizedDescription
+                self.evalResult = nil
+                self.isEvaluating = false
             }
         }
     }

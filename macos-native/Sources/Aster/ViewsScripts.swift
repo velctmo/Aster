@@ -965,26 +965,21 @@ function main(config) {
         }
     }
 
+    @MainActor
     private func save() {
         isSaving = true
         errorMessage = nil
         saveSuccessMessage = nil
-        Task {
+        Task { @MainActor in
             do {
                 try await state.updateScript(id: script.id, name: name, content: content)
-                await MainActor.run {
-                    self.isSaving = false
-                    self.saveSuccessMessage = "保存成功并已热重载！"
-                }
+                self.isSaving = false
+                self.saveSuccessMessage = "保存成功并已热重载！"
                 try? await Task.sleep(for: .seconds(2))
-                await MainActor.run {
-                    self.saveSuccessMessage = nil
-                }
+                self.saveSuccessMessage = nil
             } catch {
-                await MainActor.run {
-                    self.isSaving = false
-                    self.errorMessage = error.localizedDescription
-                }
+                self.isSaving = false
+                self.errorMessage = error.localizedDescription
             }
         }
     }
@@ -1045,23 +1040,20 @@ public struct NewScriptSheet: View {
         .frame(width: 420)
     }
 
+    @MainActor
     private func create() {
         isCreating = true
         errorMessage = nil
         let content = ScriptTemplates.blankStarter
 
-        Task {
+        Task { @MainActor in
             do {
                 let created = try await state.createScript(name: name, kind: kind, content: content)
-                await MainActor.run {
-                    isPresented = false
-                    onCreated(created.id)
-                }
+                isPresented = false
+                onCreated(created.id)
             } catch {
-                await MainActor.run {
-                    self.errorMessage = error.localizedDescription
-                    self.isCreating = false
-                }
+                self.errorMessage = error.localizedDescription
+                self.isCreating = false
             }
         }
     }

@@ -54,7 +54,7 @@ public struct RulesView: View {
 
     // 内置系统高优先级默认规则
     private var builtInSystemRules: [UnifiedRuleTableRow] {
-        var list: [UnifiedRuleTableRow] = [
+        [
             UnifiedRuleTableRow(
                 id: "system-private-1",
                 matchType: "IP-IS-PRIVATE",
@@ -62,21 +62,16 @@ public struct RulesView: View {
                 action: "DIRECT",
                 source: "SYSTEM",
                 hits: 0
+            ),
+            UnifiedRuleTableRow(
+                id: "system-cn-2",
+                matchType: "RULE-SET",
+                payload: "geosite-cn / geoip-cn (中国大陆直连)",
+                action: "DIRECT",
+                source: "SYSTEM",
+                hits: 0
             )
         ]
-        if state.directCN {
-            list.append(
-                UnifiedRuleTableRow(
-                    id: "system-cn-2",
-                    matchType: "RULE-SET",
-                    payload: "geosite-cn / geoip-cn (中国大陆直连)",
-                    action: "DIRECT",
-                    source: "SYSTEM",
-                    hits: 0
-                )
-            )
-        }
-        return list
     }
 
     // 动态规则转换 (包含用户手动自建与覆写脚本动态注入的规则)

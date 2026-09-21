@@ -84,3 +84,10 @@ jobs:
             build/Aster-macos-*.zip
             build/Aster-unsigned.pkg
           if-no-files-found: error
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-failure-log
+          path: build/xcodebuild.log
+          if-no-files-found: ignore
