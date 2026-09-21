@@ -392,6 +392,7 @@ public struct OutboundsView: View {
 
 // MARK: - 策略组成员精巧小卡片
 public struct GroupNodeCard: View {
+    @ObservedObject private var state = AsterState.shared
     public var tag: String
     public var node: ProxyNode?
     public var isSelector: Bool
@@ -407,11 +408,11 @@ public struct GroupNodeCard: View {
     }
 
     private var autoWinnerName: String? {
-        AsterState.shared.autoWinnerName()
+        state.autoWinnerName()
     }
 
     private var effectiveDelay: Int {
-        AsterState.shared.memberDelay(for: tag)
+        state.memberDelay(for: tag)
     }
 
     private var accentColor: Color {
@@ -423,7 +424,7 @@ public struct GroupNodeCard: View {
     }
 
     private var cardTitle: String {
-        AsterState.shared.memberTitle(for: tag)
+        state.memberTitle(for: tag)
     }
 
     @ViewBuilder

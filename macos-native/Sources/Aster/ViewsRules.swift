@@ -22,6 +22,7 @@ public struct UnifiedRuleTableRow: Identifiable, Hashable {
     }
 }
 
+@MainActor
 public struct RulesView: View {
     private let state: AsterState
     @ObservedObject private var ruleStore: RuleStore

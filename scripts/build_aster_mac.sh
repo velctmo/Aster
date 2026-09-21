@@ -90,6 +90,17 @@ else
     echo "==================================================" >&2
     echo "▶ 日志末尾 100 行:" >&2
     tail -n 100 "$XCODE_LOG" >&2 || true
+    if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+      {
+        echo "## Xcodebuild Failure Report"
+        echo '```text'
+        echo "=== ERRORS ==="
+        grep -E -C 2 "(error:|fatal error:)" "$XCODE_LOG" | head -n 80 || true
+        echo "=== LOG TAIL (100 lines) ==="
+        tail -n 100 "$XCODE_LOG"
+        echo '```'
+      } >> "$GITHUB_STEP_SUMMARY"
+    fi
     exit 1
   fi
   BUILT_APP=$(find build/DerivedData -name 'Aster.app' -type d | head -1 || true)
