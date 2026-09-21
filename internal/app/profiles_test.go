@@ -1047,9 +1047,12 @@ func TestProfileContent(t *testing.T) {
 		t.Fatalf("expected nodeCount=1, got %d", content.NodeCount)
 	}
 
-	// Activate and check Nodes()
-	if err := a.ActivateProfile(subID); err != nil {
-		t.Fatalf("ActivateProfile error: %v", err)
+	// Set active profile in store and check Nodes()
+	if _, err := a.Store().Update(func(cur *state.File) error {
+		cur.ActiveConfigID = subID
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 	nodes := a.Nodes()
 	foundSS := false
