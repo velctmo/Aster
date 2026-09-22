@@ -8,164 +8,212 @@ public struct OverviewDashboardView: View {
 
     public var body: some View {
         let importedProfile = state.status.activeConfigKind == "subscription"
-        VStack(spacing: 0) {
-            PageHeader(title: "控制台") {
-                HStack(spacing: 8) {
-                    Menu("出站模式", systemImage: "arrow.triangle.branch") {
-                        Button("智能规则") { state.setMode("rule") }
-                        Button("全局代理") { state.setMode("global") }
-                        Button("直接连接") { state.setMode("direct") }
+        GeometryReader { proxy in
+            let isWide = proxy.size.width >= 750
+            VStack(spacing: 0) {
+                // 顶栏：标题 + 出站模式 Segmented 控制器 + 快速重载
+                PageHeader(title: "控制台") {
+                    HStack(spacing: 10) {
+                        ModeSegmentedControl(selectedMode: Binding(
+                            get: { state.status.mode },
+                            set: { state.setMode($0) }
+                        ))
+                        .disabled(!(state.status.capabilities?.ruleControl.available ?? true))
+                        .help(state.status.capabilities?.ruleControl.reason ?? "切换全局出站分流模式")
+
+                        Button(action: {
+                            state.restartCore()
+                        }) {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .buttonStyle(.exquisiteSecondary(height: 24))
+                        .help("重新启动 sing-box 代理内核")
                     }
-                    .disabled(!(state.status.capabilities?.ruleControl.available ?? true))
-                    .help(state.status.capabilities?.ruleControl.reason ?? "切换出站模式")
-
                 }
-            }
 
-            if let actionError = state.actionError, !actionError.isEmpty {
-                Text(actionError)
-                    .font(.system(size: 12))
-                    .foregroundColor(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, DesignTokens.pagePadding)
-                    .padding(.top, 8)
-            }
+                ScrollView {
+                    Group {
+                        if isWide {
+                            HStack(alignment: .top, spacing: 16) {
+                                // 左列：运行中枢与实时吞吐波形
+                                VStack(alignment: .leading, spacing: 14) {
+                                    overviewSection(title: "运行中枢与核心状态") {
+                                        HeroCommandDeckView()
+                                    }
 
-            ScrollView {
-            VStack(alignment: .leading, spacing: DesignTokens.sectionGap) {
+                                    overviewSection(title: "实时网络吞吐与流量监控") {
+                                        ThroughputMonitorCard()
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
 
-                overviewSection(title: "运行状态") {
-                    OverviewModuleCard(
-                        icon: state.status.running ? "bolt.horizontal.circle.fill" : "bolt.slash.circle",
-                        iconColor: state.status.running ? .green : .orange,
-                        title: state.status.activeConfigName ?? "未选择配置",
-                        statusText: state.status.running ? "核心运行中" : (state.status.pending ? "正在启动" : "核心未运行"),
-                        statusActive: state.status.running,
-                        description: runtimeSummary,
-                        isOn: nil,
-                        customAction: {
-                            Group {
-                                if state.status.sessionPhase == "failed" || state.status.sessionPhase == "networkComponentRequired" {
-                                    Button("重新尝试") { state.restartCore() }
-                                        .buttonStyle(.bordered)
-                                        .controlSize(.small)
-                                        .accessibilityHint("重新启动当前活动配置的核心")
+                                // 右列：外部出口与网络接管
+                                VStack(alignment: .leading, spacing: 14) {
+                                    overviewSection(title: "外部出口与网络拓扑") {
+                                        DualIPCard()
+                                    }
+
+                                    overviewSection(title: "系统网络接管与局域网代理") {
+                                        overviewModulesSection(importedProfile: importedProfile, isWide: true)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                        } else {
+                            VStack(alignment: .leading, spacing: 16) {
+                                overviewSection(title: "运行中枢与核心状态") {
+                                    HeroCommandDeckView()
+                                }
+
+                                overviewSection(title: "实时网络吞吐与流量监控") {
+                                    ThroughputMonitorCard()
+                                }
+
+                                overviewSection(title: "外部出口与网络拓扑") {
+                                    DualIPCard()
+                                }
+
+                                overviewSection(title: "系统网络接管与局域网代理") {
+                                    overviewModulesSection(importedProfile: importedProfile, isWide: false)
                                 }
                             }
                         }
-                    )
-                }
-
-                // B. 第一组：网络接管卡片池 (Network Takeover)
-                overviewSection(title: "网络接管") {
-                    VStack(spacing: 12) {
-                        // 卡片 1: 系统代理
-                        OverviewModuleCard(
-                            icon: "globe",
-                            iconColor: .blue,
-                            title: "系统代理",
-                            statusText: state.status.capture.systemProxy
-                                ? (state.status.running
-                                    ? "已配置为 127.0.0.1:\(state.status.mixedPort ?? 6780)"
-                                    : "等待核心启动")
-                                : "未设置",
-                            statusActive: state.status.capture.systemProxy && state.status.running,
-                            description: "在 macOS 系统网络偏好设置中挂载 HTTP 和 HTTPS 代理。大多数应用与浏览器会自动遵循此设置。",
-                            isOn: Binding(
-                                get: { state.status.capture.systemProxy },
-                                set: { state.setCapture(systemProxy: $0, tun: state.status.capture.tun) }
-                            ),
-                            isEnabled: state.status.running && (state.status.capabilities?.systemProxy.available ?? true)
-                        )
-
-                        // 卡片 2: 虚拟网卡 (彻底去除 TUN)
-                        OverviewModuleCard(
-                            icon: "cpu.fill",
-                            iconColor: .green,
-                            title: "虚拟网卡",
-                            statusText: {
-                                if !(state.status.capabilities?.tun.available ?? true) {
-                                    return state.status.capabilities?.tun.reason ?? "请安装 Aster 网络组件（Aster.pkg）"
-                                }
-                                if state.status.capture.tun {
-                                    if state.status.running { return "运行中 (系统级接管)" }
-                                    if state.status.needAdmin { return "需要安装网络组件" }
-                                    return "等待核心启动"
-                                }
-                                return "已禁用"
-                            }(),
-                            statusActive: state.status.capture.tun && state.status.running,
-                            description: state.status.capabilities?.tun.reason ?? "创建独立虚拟网卡，全量接管 TCP/UDP 流量，游戏与终端免配全代理，无需应用主动适配。",
-                            isOn: Binding(
-                                get: { state.status.capture.tun },
-                                set: { state.setCapture(systemProxy: state.status.capture.systemProxy, tun: $0) }
-                            ),
-                            isEnabled: state.status.capabilities?.tun.available ?? true
-                        )
                     }
+                    .frame(maxWidth: 1360)
+                    .padding(.horizontal, DesignTokens.pagePadding)
+                    .padding(.vertical, 14)
                 }
-
-                // C. 第二组：局域网设备接管 (LAN Devices & Sharing)
-                overviewSection(title: "局域网设备接管") {
-                    VStack(spacing: 12) {
-                        // 卡片 3: 局域网代理共享
-                        OverviewModuleCard(
-                            icon: "network",
-                            iconColor: .indigo,
-                            title: "局域网代理共享",
-                            statusText: importedProfile ? "由完整配置管理" : (state.allowLan ? "已监听在 \(state.localLANIP):\(state.status.mixedPort ?? 6780)" : "局域网共享已关闭"),
-                            statusActive: !importedProfile && state.allowLan,
-                            description: importedProfile
-                                ? "完整订阅的入站监听由配置作者管理，Aster 不会改写局域网共享设置。"
-                                : "允许局域网内的其它设备（如手机、平板、电视或同网络电脑）通过本机的 IP 与端口代理上网。",
-                            isOn: Binding(
-                                get: { state.allowLan },
-                                set: { state.patchSettings(body: ["allowLan": $0]) }
-                            ),
-                            isEnabled: !importedProfile,
-                            actionMenu: {
-                                Button(action: { showPortsSheet.toggle() }) {
-                                    Image(systemName: "ellipsis.circle")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.secondary)
-                                }
-                                .buttonStyle(.plain)
-								.accessibilityLabel("局域网代理端口设置")
-                                .popover(isPresented: $showPortsSheet) {
-                                    PortsDetailPopoverView(port: state.status.mixedPort ?? 6780)
-                                }
-                            }
-                        )
-                    }
-                }
-            }
-            .scrollIndicators(.hidden)
-            .padding(.horizontal, DesignTokens.pagePadding)
-            .padding(.bottom, DesignTokens.pagePadding)
+                .scrollIndicators(.automatic)
             }
         }
         .onAppear {
-            Task { await state.fetchSettings() }
+            Task {
+                await state.fetchSettings()
+                state.fetchIPInfo()
+            }
         }
     }
 
-    private var runtimeSummary: String {
-        var parts = ["出口：\(state.status.selectedLabel)"]
-        if let phase = state.status.sessionPhase {
-            switch phase {
-            case "starting": parts.append("状态：正在启动")
-            case "networkComponentRequired": parts.append("状态：需要安装网络组件")
-            case "failed": parts.append("状态：启动失败")
-            default: break
+    @ViewBuilder
+    private func overviewModulesSection(importedProfile: Bool, isWide: Bool) -> some View {
+        VStack(spacing: 10) {
+            if isWide {
+                OverviewModuleCard(
+                    icon: "globe",
+                    iconColor: .blue,
+                    title: "系统代理",
+                    statusText: state.status.capture.systemProxy
+                        ? (state.status.running
+                            ? "已配置 127.0.0.1:\(state.status.mixedPort ?? 6780)"
+                            : "等待核心启动")
+                        : "未设置",
+                    statusActive: state.status.capture.systemProxy && state.status.running,
+                    description: "在系统网络中挂载 HTTP/HTTPS 代理。多数应用会自动遵循。",
+                    isOn: Binding(
+                        get: { state.status.capture.systemProxy },
+                        set: { state.setCapture(systemProxy: $0, tun: state.status.capture.tun) }
+                    ),
+                    isEnabled: state.status.running && (state.status.capabilities?.systemProxy.available ?? true)
+                )
+
+                OverviewModuleCard(
+                    icon: "cpu.fill",
+                    iconColor: .green,
+                    title: "增强虚拟网卡 (TUN)",
+                    statusText: {
+                        if !(state.status.capabilities?.tun.available ?? true) {
+                            return state.status.capabilities?.tun.reason ?? "请安装组件"
+                        }
+                        if state.status.capture.tun {
+                            if state.status.running { return "运行中 (系统级接管)" }
+                            if state.status.needAdmin { return "需要网络组件" }
+                            return "等待启动"
+                        }
+                        return "已禁用"
+                    }(),
+                    statusActive: state.status.capture.tun && state.status.running,
+                    description: state.status.capabilities?.tun.reason ?? "创建独立虚拟网卡全量接管 TCP/UDP，免配全代理。",
+                    isOn: Binding(
+                        get: { state.status.capture.tun },
+                        set: { state.setCapture(systemProxy: state.status.capture.systemProxy, tun: $0) }
+                    ),
+                    isEnabled: state.status.capabilities?.tun.available ?? true
+                )
+            } else {
+                HStack(spacing: 12) {
+                    OverviewModuleCard(
+                        icon: "globe",
+                        iconColor: .blue,
+                        title: "系统代理",
+                        statusText: state.status.capture.systemProxy
+                            ? (state.status.running
+                                ? "已配置 127.0.0.1:\(state.status.mixedPort ?? 6780)"
+                                : "等待核心启动")
+                            : "未设置",
+                        statusActive: state.status.capture.systemProxy && state.status.running,
+                        description: "在 macOS 系统网络偏好设置中挂载 HTTP 和 HTTPS 代理。大多数应用与浏览器会自动遵循此设置。",
+                        isOn: Binding(
+                            get: { state.status.capture.systemProxy },
+                            set: { state.setCapture(systemProxy: $0, tun: state.status.capture.tun) }
+                        ),
+                        isEnabled: state.status.running && (state.status.capabilities?.systemProxy.available ?? true)
+                    )
+
+                    OverviewModuleCard(
+                        icon: "cpu.fill",
+                        iconColor: .green,
+                        title: "虚拟网卡",
+                        statusText: {
+                            if !(state.status.capabilities?.tun.available ?? true) {
+                                return state.status.capabilities?.tun.reason ?? "请安装 Aster 网络组件"
+                            }
+                            if state.status.capture.tun {
+                                if state.status.running { return "运行中 (系统级接管)" }
+                                if state.status.needAdmin { return "需要安装网络组件" }
+                                return "等待核心启动"
+                            }
+                            return "已禁用"
+                        }(),
+                        statusActive: state.status.capture.tun && state.status.running,
+                        description: state.status.capabilities?.tun.reason ?? "创建独立虚拟网卡，全量接管 TCP/UDP 流量，游戏与终端免配全代理，无需应用主动适配。",
+                        isOn: Binding(
+                            get: { state.status.capture.tun },
+                            set: { state.setCapture(systemProxy: state.status.capture.systemProxy, tun: $0) }
+                        ),
+                        isEnabled: state.status.capabilities?.tun.available ?? true
+                    )
+                }
             }
+
+            OverviewModuleCard(
+                icon: "network",
+                iconColor: .indigo,
+                title: "局域网代理共享",
+                statusText: importedProfile ? "由完整配置管理" : (state.allowLan ? (state.localLANIP == "127.0.0.1" ? "已开启 (未检测到局域网 IP)" : "已监听在 \(state.localLANIP):\(state.status.mixedPort ?? 6780)") : "局域网共享已关闭"),
+                statusActive: !importedProfile && state.allowLan,
+                description: importedProfile
+                    ? "完整订阅的入站监听由配置作者管理，Aster 不会改写局域网共享设置。"
+                    : "允许局域网内的其它设备（如手机、平板、电视）通过本机的 IP 与端口代理上网。",
+                isOn: Binding(
+                    get: { state.allowLan },
+                    set: { state.patchSettings(body: ["allowLan": $0]) }
+                ),
+                isEnabled: !importedProfile,
+                actionMenu: {
+                    Button(action: { showPortsSheet.toggle() }) {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 14))
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("局域网代理端口设置")
+                    .popover(isPresented: $showPortsSheet) {
+                        PortsDetailPopoverView(port: state.status.mixedPort ?? 6780)
+                    }
+                }
+            )
         }
-        if state.status.delayMs > 0 { parts.append("延迟：\(state.status.delayMs) ms") }
-        if let restoredAt = state.status.lastSuccessfulAt, restoredAt > 0 {
-            let date = Date(timeIntervalSince1970: TimeInterval(restoredAt))
-            parts.append("最近成功：\(date.formatted(date: .abbreviated, time: .shortened))")
-        }
-        if !state.status.error.isEmpty { parts.append("错误：\(state.status.error)") }
-        return parts.joined(separator: " · ")
     }
 
     @ViewBuilder
@@ -176,6 +224,369 @@ public struct OverviewDashboardView: View {
                 .foregroundColor(.secondary)
                 .padding(.horizontal, 4)
             content()
+        }
+    }
+}
+
+// MARK: - 英雄中枢命令甲板 (Hero Command Deck)
+public struct HeroCommandDeckView: View {
+    @ObservedObject var state = AsterState.shared
+    @State private var isClearingProxy: Bool = false
+    @State private var clearProxyDone: Bool = false
+
+    public init() {}
+
+    private var activeProfileName: String {
+        state.status.activeConfigName ?? "Default"
+    }
+
+    private var statusTitle: String {
+        if state.status.running {
+            return "RUNNING"
+        } else if state.status.pending {
+            return "STARTING"
+        } else if state.status.sessionPhase == "failed" {
+            return "FAILED"
+        } else if state.status.sessionPhase == "networkComponentRequired" {
+            return "SETUP REQUIRED"
+        } else {
+            return "STANDBY"
+        }
+    }
+
+    private var statusSubtitle: String {
+        if state.status.running {
+            return "核心引擎已接管系统流量 · 实时分流中"
+        } else if state.status.pending {
+            return "正在载入核心引擎与路由策略…"
+        } else if state.status.sessionPhase == "failed" {
+            return state.status.error.isEmpty ? "核心异常退出，请检查配置或脚本" : state.status.error
+        } else if state.status.sessionPhase == "networkComponentRequired" {
+            return "增强接管需要安装并授权系统网络组件"
+        } else {
+            return "核心引擎待命中 · 随时准备接管网络流量"
+        }
+    }
+
+    private var statusColor: Color {
+        if state.status.running {
+            return Color(red: 0.20, green: 0.78, blue: 0.45) // 翡翠微光绿
+        } else if state.status.pending {
+            return .orange
+        } else if state.status.sessionPhase == "failed" {
+            return Color(red: 0.88, green: 0.35, blue: 0.35)
+        } else {
+            return .secondary
+        }
+    }
+
+    public var body: some View {
+        VStack(spacing: 16) {
+            // 甲板上层：状态信标 + 核心大字 + 快捷操作
+            HStack(alignment: .center, spacing: 14) {
+                // 左侧信标与引擎标题
+                StatusBeaconDot(active: state.status.running, color: statusColor, size: 8)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 8) {
+                        Text(statusTitle)
+                            .font(.system(size: 18, weight: .black, design: .rounded))
+                            .tracking(1.0)
+                            .foregroundColor(state.status.running ? .primary : .secondary)
+
+                        // 配置文件胶囊
+                        HStack(spacing: 4) {
+                            Image(systemName: "doc.text")
+                                .font(.system(size: 9, weight: .semibold))
+                            Text(activeProfileName)
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        }
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 2.5)
+                        .background(Color.accentColor.opacity(0.10))
+                        .foregroundColor(Color.accentColor)
+                        .clipShape(Capsule())
+                        .overlay(Capsule().strokeBorder(Color.accentColor.opacity(0.25), lineWidth: 0.6))
+                    }
+
+                    Text(statusSubtitle)
+                        .font(.system(size: 11.5))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 12)
+
+                // 右侧快捷操作：重试 / 重启内核 / 节点入口
+                HStack(spacing: 8) {
+                    if state.status.sessionPhase == "failed" || state.status.sessionPhase == "networkComponentRequired" {
+                        Button(action: { state.restartCore() }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.counterclockwise")
+                                Text("重试启动")
+                            }
+                        }
+                        .buttonStyle(.exquisitePrimary)
+                    } else {
+                        Button(action: { state.restartCore() }) {
+                            HStack(spacing: 5) {
+                                Image(systemName: "arrow.clockwise")
+                                    .font(.system(size: 10, weight: .bold))
+                                Text("重载内核")
+                                    .font(.system(size: 11.5, weight: .medium))
+                            }
+                        }
+                        .buttonStyle(.exquisiteSecondary(height: 28))
+                        .help("重新启动 sing-box 内核并平滑重载配置")
+
+                        Button(action: {
+                            isClearingProxy = true
+                            Task {
+                                try? await state.clearSystemProxyResidue()
+                                clearProxyDone = true
+                                try? await Task.sleep(for: .seconds(2))
+                                clearProxyDone = false
+                                isClearingProxy = false
+                            }
+                        }) {
+                            HStack(spacing: 4) {
+                                if isClearingProxy {
+                                    ProgressView().controlSize(.mini).frame(width: 10, height: 10)
+                                } else {
+                                    Image(systemName: clearProxyDone ? "checkmark" : "shield.slash")
+                                        .font(.system(size: 10))
+                                }
+                                Text(clearProxyDone ? "已清理" : "清理代理")
+                                    .font(.system(size: 11.5, weight: .medium))
+                            }
+                        }
+                        .buttonStyle(.exquisiteSecondary(height: 28))
+                        .help("一键清除 macOS 系统网络中遗留的 HTTP/HTTPS 代理设置")
+
+                        Button(action: { state.selectedTab = .nodes }) {
+                            HStack(spacing: 5) {
+                                Image(systemName: "square.stack.3d.up")
+                                    .font(.system(size: 11))
+                                Text("选择出站")
+                                    .font(.system(size: 11.5, weight: .medium))
+                            }
+                        }
+                        .buttonStyle(.exquisiteSecondary(height: 28))
+                        .help("进入出站策略组与节点视图")
+                    }
+                }
+            }
+
+            // 分割微光线
+            Divider().opacity(0.2)
+
+            // 甲板下层：当前活动出口节点与网络遥测信息
+            HStack(spacing: 16) {
+                // 出口网关信息
+                HStack(spacing: 10) {
+                    Image(systemName: "network")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(TrafficColors.down)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("当前活动出口")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.secondary)
+
+                        HStack(spacing: 6) {
+                            Text(NodeNameSanitizer.clean(state.status.selectedLabel))
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(.primary)
+                                .lineLimit(1)
+
+                            if let node = state.findNode(for: state.status.selected) {
+                                Text(node.protocolName.uppercased())
+                                    .font(.system(size: 8.5, weight: .black, design: .monospaced))
+                                    .padding(.horizontal, 4.5)
+                                    .padding(.vertical, 1.5)
+                                    .background(Color.secondary.opacity(0.12))
+                                    .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                }
+
+                Spacer(minLength: 8)
+
+                // 实时延迟与辅助状态
+                HStack(spacing: 12) {
+                    if state.status.delayMs > 0 {
+                        HStack(spacing: 5) {
+                            Text("RTT")
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .foregroundColor(.secondary)
+                            LatencyBadge(delayMs: state.status.delayMs, isTesting: state.isTestingDelays)
+                        }
+                    }
+
+                    if let lastSync = state.status.lastSuccessfulAt, lastSync > 0 {
+                        let date = Date(timeIntervalSince1970: TimeInterval(lastSync))
+                        Text("活跃于 \(date.formatted(date: .omitted, time: .shortened))")
+                            .font(.system(size: 10.5, design: .monospaced))
+                            .foregroundColor(.secondary.opacity(0.7))
+                    }
+                }
+            }
+        }
+        .asterCard(cornerRadius: AsterMetrics.radiusCard, padding: 16)
+    }
+}
+
+// MARK: - 实时吞吐量波形监控卡片
+public struct ThroughputMonitorCard: View {
+    @ObservedObject var state = AsterState.shared
+
+    public init() {}
+
+    public var body: some View {
+        VStack(spacing: 12) {
+            // 上半部分：上下行瞬时速率 + 累计流量
+            HStack(spacing: 20) {
+                // 下行速率
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(TrafficColors.down.opacity(0.14))
+                            .frame(width: 32, height: 32)
+                        Image(systemName: "arrow.down")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(TrafficColors.down)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("下行速率")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.secondary)
+                        Text(Formatters.speedString(state.currentDownSpeed))
+                            .font(.system(size: 18, weight: .bold, design: .monospaced))
+                            .foregroundColor(.primary)
+                            .monospacedDigit()
+                    }
+                }
+
+                // 上行速率
+                HStack(spacing: 10) {
+                    ZStack {
+                        Circle()
+                            .fill(TrafficColors.up.opacity(0.14))
+                            .frame(width: 32, height: 32)
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(TrafficColors.up)
+                    }
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("上行速率")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.secondary)
+                        Text(Formatters.speedString(state.currentUpSpeed))
+                            .font(.system(size: 18, weight: .bold, design: .monospaced))
+                            .foregroundColor(.primary)
+                            .monospacedDigit()
+                    }
+                }
+
+                Spacer()
+
+                // 会话累计统计
+                VStack(alignment: .trailing, spacing: 3) {
+                    HStack(spacing: 4) {
+                        Text("下行累计:")
+                            .font(.system(size: 10.5))
+                            .foregroundColor(.secondary)
+                        Text(Formatters.bytesString(state.downloadTotal))
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundColor(.primary.opacity(0.85))
+                            .monospacedDigit()
+                    }
+                    HStack(spacing: 4) {
+                        Text("上行累计:")
+                            .font(.system(size: 10.5))
+                            .foregroundColor(.secondary)
+                        Text(Formatters.bytesString(state.uploadTotal))
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundColor(.primary.opacity(0.85))
+                            .monospacedDigit()
+                    }
+                }
+            }
+
+            // 下半部分：平滑实时波形折线图
+            realtimeChart
+                .frame(height: 72)
+        }
+        .asterCard(cornerRadius: AsterMetrics.radiusCard, padding: 14)
+    }
+
+    @ViewBuilder
+    private var realtimeChart: some View {
+        let history = state.trafficHistory.suffix(30)
+        if #available(macOS 13.0, *), history.count >= 2 {
+            Chart {
+                ForEach(Array(history)) { pt in
+                    AreaMark(
+                        x: .value("时间", pt.timestamp),
+                        y: .value("下行", pt.downloadSpeed)
+                    )
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [TrafficColors.down.opacity(0.25), Color.clear],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .interpolationMethod(.catmullRom)
+
+                    LineMark(
+                        x: .value("时间", pt.timestamp),
+                        y: .value("下行", pt.downloadSpeed)
+                    )
+                    .foregroundStyle(TrafficColors.down)
+                    .lineStyle(StrokeStyle(lineWidth: 1.5))
+                    .interpolationMethod(.catmullRom)
+
+                    AreaMark(
+                        x: .value("时间", pt.timestamp),
+                        y: .value("上行", pt.uploadSpeed)
+                    )
+                    .foregroundStyle(
+                        LinearGradient(
+                            colors: [TrafficColors.up.opacity(0.20), Color.clear],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+                    .interpolationMethod(.catmullRom)
+
+                    LineMark(
+                        x: .value("时间", pt.timestamp),
+                        y: .value("上行", pt.uploadSpeed)
+                    )
+                    .foregroundStyle(TrafficColors.up)
+                    .lineStyle(StrokeStyle(lineWidth: 1.2))
+                    .interpolationMethod(.catmullRom)
+                }
+            }
+            .chartXAxis(.hidden)
+            .chartYAxis(.hidden)
+            .chartLegend(.hidden)
+        } else {
+            ZStack {
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(Color.primary.opacity(0.02))
+                HStack(spacing: 4) {
+                    Image(systemName: "waveform.path.ecg")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    Text("实时网络吞吐监听已就绪")
+                        .font(.system(size: 10.5))
+                        .foregroundColor(.secondary)
+                }
+            }
         }
     }
 }
@@ -218,43 +629,45 @@ public struct OverviewModuleCard<ActionContent: View>: View {
     }
 
     public var body: some View {
-        HStack(alignment: .top, spacing: 14) {
-            // 左侧大圆标
+        HStack(alignment: .top, spacing: 12) {
+            // 左侧精致图标
             ZStack {
                 Circle()
                     .fill(iconColor.opacity(0.14))
-                    .frame(width: 44, height: 44)
+                    .frame(width: 36, height: 36)
                 Image(systemName: icon)
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                     .foregroundColor(iconColor)
             }
 
             // 中间信息
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 8) {
                     Text(title)
-                        .font(.system(size: 15, weight: .bold))
+                        .font(.system(size: 14, weight: .bold))
                     HStack(spacing: 4) {
                         Circle()
                             .fill(statusActive ? Color.green : Color.secondary.opacity(0.4))
-                            .frame(width: 6.5, height: 6.5)
+                            .frame(width: 6, height: 6)
                         Text(statusText)
-                            .font(.system(size: 11, weight: statusActive ? .semibold : .regular))
+                            .font(.system(size: 10.5, weight: statusActive ? .semibold : .regular))
                             .foregroundColor(statusActive ? .primary : .secondary)
+                            .lineLimit(1)
                     }
                 }
 
                 Text(description)
-                    .font(.system(size: 11.5))
+                    .font(.system(size: 11))
                     .foregroundColor(.secondary)
-                    .lineSpacing(2)
+                    .lineSpacing(1.5)
+                    .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Spacer()
+            Spacer(minLength: 8)
 
             // 右侧操作
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 if let toggleBinding = isOn {
                     Toggle("", isOn: toggleBinding)
                         .toggleStyle(SwitchToggleStyle())
@@ -271,14 +684,8 @@ public struct OverviewModuleCard<ActionContent: View>: View {
                 }
             }
         }
-        .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(.ultraThinMaterial)
-        )
-        .liquidGlassBorder(cornerRadius: 12)
-        .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
+        .asterCard(cornerRadius: AsterMetrics.radiusCard, padding: 12)
     }
 }
 
@@ -341,9 +748,8 @@ public struct DualIPDetailPopoverView: View {
                     Spacer()
                     Button(action: {
                         let ip = state.dualIP.localIP.ip
-                        guard !ip.isEmpty && ip != "检测中..." && ip != "检测失败" else { return }
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(ip, forType: .string)
+                        guard !ip.isEmpty && ip != "检测中..." && ip != "检测中…" && ip != "检测失败" && ip != "127.0.0.1" else { return }
+                        ClipboardHelper.copy(ip)
                         copiedLocal = true
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copiedLocal = false }
                     }) {
@@ -353,7 +759,8 @@ public struct DualIPDetailPopoverView: View {
                     }
                     .buttonStyle(.plain)
                 }
-                Text(state.dualIP.localIP.ip.isEmpty ? "---" : state.dualIP.localIP.ip)
+                let localIP = (state.dualIP.localIP.ip.isEmpty || state.dualIP.localIP.ip == "127.0.0.1") ? "检测中…" : state.dualIP.localIP.ip
+                Text(localIP)
                     .font(.system(size: 14, weight: .bold, design: .monospaced))
                 Text([state.dualIP.localIP.country, state.dualIP.localIP.city, state.dualIP.localIP.isp].filter { !$0.isEmpty && $0 != "未知" }.joined(separator: " · "))
                     .font(.system(size: 10.5))
@@ -372,9 +779,8 @@ public struct DualIPDetailPopoverView: View {
                     Spacer()
                     Button(action: {
                         let ip = state.dualIP.proxyIP.ip
-                        guard !ip.isEmpty && ip != "检测中..." && ip != "检测失败" && ip != "待连接" else { return }
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(ip, forType: .string)
+                        guard !ip.isEmpty && ip != "检测中..." && ip != "检测中…" && ip != "检测失败" && ip != "待连接" else { return }
+                        ClipboardHelper.copy(ip)
                         copiedProxy = true
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copiedProxy = false }
                     }) {
@@ -423,8 +829,7 @@ public struct DualIPCard: View {
                     Button(action: {
                         let ip = state.dualIP.localIP.ip
                         guard !ip.isEmpty && ip != "检测中..." && ip != "检测失败" else { return }
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(ip, forType: .string)
+                        ClipboardHelper.copy(ip)
                         copiedLocal = true
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copiedLocal = false }
                     }) {
@@ -437,8 +842,10 @@ public struct DualIPCard: View {
                 }
 
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(state.dualIP.localIP.ip.isEmpty ? "127.0.0.1" : state.dualIP.localIP.ip)
+                    let localIPText = (state.dualIP.localIP.ip.isEmpty || state.dualIP.localIP.ip == "127.0.0.1") ? "检测中…" : state.dualIP.localIP.ip
+                    Text(localIPText)
                         .font(.system(size: 15, weight: .bold, design: .monospaced))
+                        .foregroundColor(localIPText == "检测中…" ? .secondary : .primary)
                         .lineLimit(1)
 
                     let location = [state.dualIP.localIP.country, state.dualIP.localIP.city].filter { !$0.isEmpty && $0 != "未知" }.joined(separator: " ")
@@ -457,14 +864,8 @@ public struct DualIPCard: View {
                     }
                 }
             }
-            .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(.ultraThinMaterial)
-            )
-            .liquidGlassBorder(cornerRadius: 12)
-            .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
+            .asterCard(cornerRadius: AsterMetrics.radiusCard, padding: 14)
 
             // B. 代理出口落地 IP 卡片 (右列)
             VStack(alignment: .leading, spacing: 8) {
@@ -497,7 +898,7 @@ public struct DualIPCard: View {
                         state.fetchIPInfo(force: true)
                     }) {
                         if state.isFetchingIP {
-                            ProgressView().scaleEffect(0.5).frame(width: 14, height: 14)
+                            ProgressView().controlSize(.mini).frame(width: 14, height: 14)
                         } else {
                             Image(systemName: "arrow.clockwise")
                                 .font(.system(size: 11))
@@ -511,8 +912,7 @@ public struct DualIPCard: View {
                     Button(action: {
                         let ip = state.dualIP.proxyIP.ip
                         guard !ip.isEmpty && ip != "---" && ip != "待连接" && ip != "检测失败" else { return }
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(ip, forType: .string)
+                        ClipboardHelper.copy(ip)
                         copiedProxy = true
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { copiedProxy = false }
                     }) {
@@ -532,8 +932,9 @@ public struct DualIPCard: View {
                         .lineLimit(1)
 
                     let location = [state.dualIP.proxyIP.country, state.dualIP.proxyIP.city].filter { !$0.isEmpty && $0 != "未知" && $0 != "检测失败" }.joined(separator: " ")
+                    let defaultProxyLocation = !state.status.running ? "核心未启动" : (state.status.mode == "direct" ? "直连模式 (不经代理)" : "检测中…")
                     HStack(spacing: 4) {
-                        Text(location.isEmpty ? "直连模式" : location)
+                        Text(location.isEmpty ? defaultProxyLocation : location)
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                             .lineLimit(1)
@@ -546,14 +947,8 @@ public struct DualIPCard: View {
                     }
                 }
             }
-            .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(.ultraThinMaterial)
-            )
-            .liquidGlassBorder(cornerRadius: 12)
-            .shadow(color: Color.black.opacity(0.04), radius: 6, x: 0, y: 2)
+            .asterCard(cornerRadius: AsterMetrics.radiusCard, padding: 14)
         }
     }
 }
@@ -654,8 +1049,7 @@ public struct PortsDetailPopoverView: View {
     }
 
     private func copyText(_ text: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        ClipboardHelper.copy(text)
     }
 }
 

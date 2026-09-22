@@ -6,7 +6,7 @@ public struct UnifiedRuleTableRow: Identifiable, Hashable {
     public let id: String
     public let matchType: String   // 全大写匹配类型: DOMAIN-SUFFIX, IP-CIDR, RULE-SET, etc.
     public let payload: String     // 规则内容 / 目标域名 / CIDR (保留特定大小写)
-    public let action: String      // 执行动作 / 策略组: PROXY, DIRECT, REJECT, 🔍 GOOGLE, etc.
+    public let action: String      // 执行动作 / 策略组: PROXY, DIRECT, REJECT, GOOGLE, etc.
     public let source: String      // 来源: USER (手动添加), SCRIPT (覆写脚本), SYSTEM (内置默认)
     public let hits: Int           // 命中统计
     public var isSystem: Bool { source == "SYSTEM" }
@@ -22,6 +22,7 @@ public struct UnifiedRuleTableRow: Identifiable, Hashable {
     }
 }
 
+@MainActor
 public struct RulesView: View {
     private let state: AsterState
     @ObservedObject private var ruleStore: RuleStore
@@ -34,6 +35,14 @@ public struct RulesView: View {
         .init(\.priority, order: .reverse),
         .init(\.matchType, order: .forward)
     ]
+    // 规则判定模拟器 (Surge 旗舰级规则测试工具)
+    @State private var showEvaluator: Bool = true
+    @State private var evalTarget: String = ""
+    @State private var evalProcess: String = ""
+    @State private var evalPort: String = ""
+    @State private var isEvaluating: Bool = false
+    @State private var evalResult: RuleEvaluateResult? = nil
+    @State private var evalError: String? = nil
 
     @MainActor
     public init(state: AsterState? = nil) {
@@ -56,15 +65,7 @@ public struct RulesView: View {
     private var builtInSystemRules: [UnifiedRuleTableRow] {
         [
             UnifiedRuleTableRow(
-                id: "system-ads-1",
-                matchType: "RULE-SET",
-                payload: "geosite-category-ads-all (广告拦截)",
-                action: "REJECT",
-                source: "SYSTEM",
-                hits: 0
-            ),
-            UnifiedRuleTableRow(
-                id: "system-private-2",
+                id: "system-private-1",
                 matchType: "IP-IS-PRIVATE",
                 payload: "局域网私有 IP (LAN 直连)",
                 action: "DIRECT",
@@ -72,7 +73,7 @@ public struct RulesView: View {
                 hits: 0
             ),
             UnifiedRuleTableRow(
-                id: "system-cn-3",
+                id: "system-cn-2",
                 matchType: "RULE-SET",
                 payload: "geosite-cn / geoip-cn (中国大陆直连)",
                 action: "DIRECT",
@@ -166,6 +167,19 @@ public struct RulesView: View {
                     }
 
                     Button(action: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                            showEvaluator.toggle()
+                        }
+                    }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "sparkle.magnifyingglass")
+                            Text(showEvaluator ? "收起判定器" : "规则判定器")
+                        }
+                    }
+                    .buttonStyle(.exquisiteSecondary(height: 28))
+                    .help("展开/收起 Surge 级网络路由规则模拟器")
+
+                    Button(action: {
                         addRuleContext = AddRuleContext.forCustom()
                     }) {
                         Label("添加规则", systemImage: "plus")
@@ -177,38 +191,15 @@ public struct RulesView: View {
 
             Divider().opacity(0.4)
 
+            if showEvaluator {
+                ruleEvaluatorDeck
+                Divider().opacity(0.3)
+            }
+
             // 搜索与过滤工具栏
             HStack(spacing: 12) {
                 // 搜索框
-                HStack(spacing: 6) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundStyle(.secondary)
-
-                    TextField("搜索类型、域名、IP 或策略…", text: $searchText)
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 12))
-
-                    if !searchText.isEmpty {
-                        Button {
-                            searchText = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 11))
-                                .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("清空规则搜索")
-                    }
-                }
-                .padding(.horizontal, 10)
-                .frame(height: 28)
-                .background(Color.primary.opacity(0.04))
-                .clipShape(.rect(cornerRadius: 7))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 7)
-                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.8)
-                )
+                ExquisiteSearchField(placeholder: "搜索类型、域名、IP 或策略…", text: $searchText)
 
                 Picker("过滤", selection: $selectedFilter) {
                     ForEach(RuleFilter.allCases) { filter in
@@ -232,16 +223,11 @@ public struct RulesView: View {
 
             // 原生 Table 数据表格 (IDE 代码编辑器质感)
             if visibleRules.isEmpty {
-                VStack(spacing: 12) {
-                    Spacer()
-                    Image(systemName: "line.3.horizontal.decrease.circle")
-                        .font(.system(size: 38))
-                        .foregroundStyle(.secondary.opacity(0.4))
-                    Text(searchText.isEmpty ? "暂无匹配规则" : "未找到包含「\(searchText)」的规则")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
+                AsterEmptyState(
+                    icon: "line.3.horizontal.decrease.circle",
+                    title: searchText.isEmpty ? "暂无匹配规则" : "未找到包含「\(searchText)」的规则",
+                    subtitle: searchText.isEmpty ? "当前激活配置未定义分流规则或规则集正在加载" : "尝试更换搜索关键字或清除过滤条件"
+                )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 Table(visibleRules, selection: $selectedRuleId, sortOrder: $sortOrder) {
@@ -278,20 +264,24 @@ public struct RulesView: View {
                         let (labelText, bgCol, textCol): (String, Color, Color) = {
                             switch rule.source {
                             case "SCRIPT":
-                                return ("[脚本]", Color.purple.opacity(0.12), Color.purple)
+                                return ("脚本", Color.purple.opacity(0.12), Color.purple)
                             case "USER":
-                                return ("[用户]", Color.blue.opacity(0.12), Color.blue)
+                                return ("用户", Color.blue.opacity(0.12), Color.blue)
                             default:
-                                return ("[内置]", Color.primary.opacity(0.05), Color.secondary)
+                                return ("内置", Color.primary.opacity(0.05), Color.secondary)
                             }
                         }()
                         Text(labelText)
-                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 10, weight: .semibold))
                             .foregroundStyle(textCol)
-                            .padding(.horizontal, 5)
+                            .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(bgCol)
-                            .clipShape(.rect(cornerRadius: 3.5))
+                            .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .strokeBorder(textCol.opacity(0.25), lineWidth: 0.5)
+                            )
                     }
                     .width(min: 55, ideal: 65, max: 80)
 
@@ -385,4 +375,188 @@ public struct RulesView: View {
         }()
         addRuleContext = AddRuleContext.forCustom(type: ruleType, value: rule.payload, action: rule.action.uppercased())
     }
+
+    // MARK: - 规则判定模拟器视图 (Surge 旗舰级规则测试工具)
+    @ViewBuilder
+    private var ruleEvaluatorDeck: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "sparkle.magnifyingglass")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.accentColor)
+                Text("规则判定模拟器")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.primary)
+                Text("输入目标地址即可模拟全量分流规则匹配链")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+
+                Spacer()
+
+                Button {
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        showEvaluator = false
+                    }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("隐藏判定器")
+            }
+
+            HStack(spacing: 8) {
+                ExquisiteSearchField(
+                    placeholder: "输入待判定的域名 (如 apple.com)、IP (如 1.1.1.1) 或 Host…",
+                    text: $evalTarget,
+                    maxWidth: .infinity
+                )
+                .onSubmit {
+                    performEvaluation()
+                }
+
+                TextField("进程 (可选)", text: $evalProcess)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 100)
+                    .font(.system(size: 11.5))
+
+                TextField("端口", text: $evalPort)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 58)
+                    .font(.system(size: 11.5))
+
+                Button(action: performEvaluation) {
+                    HStack(spacing: 4) {
+                        if isEvaluating {
+                            ProgressView().controlSize(.mini).frame(width: 12, height: 12)
+                        } else {
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 9))
+                        }
+                        Text("模拟判定")
+                    }
+                }
+                .buttonStyle(.exquisitePrimary)
+                .disabled(isEvaluating || evalTarget.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+
+            if let res = evalResult {
+                HStack(spacing: 12) {
+                    // 命中状态
+                    HStack(spacing: 5) {
+                        Circle()
+                            .fill(res.matched ? Color(red: 0.22, green: 0.72, blue: 0.48) : Color(red: 0.25, green: 0.55, blue: 0.95))
+                            .frame(width: 6, height: 6)
+                        Text(res.matched ? "命中规则" : "默认分流 (FINAL)")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(res.matched ? Color(red: 0.22, green: 0.72, blue: 0.48) : Color(red: 0.25, green: 0.55, blue: 0.95))
+                    }
+
+                    // 规则类型与匹配项
+                    if !res.ruleType.isEmpty {
+                        Text("\(res.ruleType): \(res.payload)")
+                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .foregroundColor(.primary)
+                            .lineLimit(1)
+                    }
+
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.secondary)
+
+                    // 执行策略胶囊
+                    ActionBadge(action: res.outbound)
+
+                    // 最终出站节点
+                    if !res.selectedNode.isEmpty && res.selectedNode != res.outbound {
+                        HStack(spacing: 4) {
+                            Image(systemName: "server.rack")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                            Text(NodeNameSanitizer.clean(res.selectedNode))
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.primary)
+                        }
+                    }
+
+                    Spacer()
+
+                    // 判定耗时
+                    Text(String(format: "%.2f ms", res.evaluationTimeMs))
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+
+                    // 在表格中联动高亮
+                    if selectedRuleId != nil {
+                        Button {
+                            // Rule is already selected
+                        } label: {
+                            HStack(spacing: 3) {
+                                Image(systemName: "scope")
+                                Text("已在列表中高亮")
+                            }
+                        }
+                        .font(.system(size: 10.5, weight: .medium))
+                        .buttonStyle(.plain)
+                        .foregroundColor(.accentColor)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.primary.opacity(0.035))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+                )
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            } else if let err = evalError {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.red)
+                    Text(err)
+                        .font(.system(size: 11))
+                        .foregroundColor(.red)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(Color.red.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            }
+        }
+        .asterCard(padding: 14)
+        .padding(.horizontal, 22)
+        .padding(.top, 10)
+        .padding(.bottom, 4)
+    }
+
+    private func performEvaluation() {
+        let target = evalTarget.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !target.isEmpty else { return }
+        isEvaluating = true
+        evalError = nil
+        evalResult = nil
+        let proc = evalProcess.trimmingCharacters(in: .whitespacesAndNewlines)
+        let processParam: String? = proc.isEmpty ? nil : proc
+        let portParam: Int? = Int(evalPort.trimmingCharacters(in: .whitespacesAndNewlines))
+        Task {
+            defer { isEvaluating = false }
+            do {
+                let res = try await state.evaluateRule(target: target, process: processParam, port: portParam, network: "tcp")
+                self.evalResult = res
+                if let matched = allRules.first(where: {
+                    $0.payload.localizedCaseInsensitiveContains(res.payload) ||
+                    res.payload.localizedCaseInsensitiveContains($0.payload)
+                }) {
+                    self.selectedRuleId = matched.id
+                }
+            } catch {
+                self.evalError = error.localizedDescription
+            }
+        }
+    }
 }
+

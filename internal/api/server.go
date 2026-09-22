@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,6 +55,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /api/v1/capture", s.patchCapture)
 	mux.HandleFunc("PATCH /api/v1/mode", s.patchMode)
 	mux.HandleFunc("GET /api/v1/configs", s.getConfigs)
+	mux.HandleFunc("GET /api/v1/configs/{id}/content", s.getConfigContent)
 	mux.HandleFunc("POST /api/v1/configs", s.postConfig)
 	mux.HandleFunc("POST /api/v1/configs/refresh-all", s.refreshAllConfigs)
 	mux.HandleFunc("POST /api/v1/configs/{id}/activate", s.activateConfig)
@@ -75,6 +77,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/nodes/delay", s.delay)
 	mux.HandleFunc("POST /api/v1/nodes/speedtest", s.speedtest)
 	mux.HandleFunc("GET /api/v1/rules", s.getRules)
+	mux.HandleFunc("GET /api/v1/rules/evaluate", s.evaluateRule)
 	mux.HandleFunc("POST /api/v1/rules", s.postRule)
 	mux.HandleFunc("POST /api/v1/rules/from-log", s.ruleFromLog)
 	mux.HandleFunc("POST /api/v1/rules/reorder", s.reorderRules)
@@ -242,7 +245,10 @@ func (s *Server) postConfig(w http.ResponseWriter, r *http.Request) {
 	all := s.App.Profiles()
 	if body.Activate && len(all) > 0 {
 		newID := all[len(all)-1].ID
-		_ = s.App.ActivateProfile(newID)
+		if actErr := s.App.ActivateProfile(newID); actErr != nil {
+			writeErr(w, actErr)
+			return
+		}
 	}
 	writeJSON(w, s.App.Profiles())
 }
@@ -318,6 +324,22 @@ func (s *Server) bindConfigScript(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, s.App.Profiles())
+}
+
+func (s *Server) getConfigContent(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	content, err := s.App.ProfileContent(id)
+	if err != nil {
+		if strings.Contains(err.Error(), "不存在") {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusNotFound)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			return
+		}
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, content)
 }
 
 func (s *Server) getScripts(w http.ResponseWriter, r *http.Request) {
@@ -471,7 +493,7 @@ func (s *Server) delay(w http.ResponseWriter, r *http.Request) {
 	}
 	d, err := s.App.Delay(body.Tag)
 	if err != nil {
-		writeJSON(w, map[string]any{"tag": body.Tag, "delay": 0, "error": err.Error()})
+		writeJSON(w, map[string]any{"tag": body.Tag, "delay": d, "error": err.Error()})
 		return
 	}
 	writeJSON(w, map[string]any{"tag": body.Tag, "delay": d})
@@ -498,6 +520,30 @@ func (s *Server) speedtest(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getRules(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.App.LiveRules())
+}
+
+func (s *Server) evaluateRule(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	target := strings.TrimSpace(q.Get("target"))
+	if target == "" {
+		writeErr(w, fmt.Errorf("target is required"))
+		return
+	}
+	process := strings.TrimSpace(q.Get("process"))
+	network := strings.TrimSpace(q.Get("network"))
+	port := 0
+	if pStr := strings.TrimSpace(q.Get("port")); pStr != "" {
+		if p, err := strconv.Atoi(pStr); err == nil {
+			port = p
+		}
+	}
+
+	result, err := s.App.EvaluateRule(target, process, port, network)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	writeJSON(w, result)
 }
 
 func (s *Server) postRule(w http.ResponseWriter, r *http.Request) {

@@ -19,6 +19,7 @@ func TestControlSocketAndToken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer a.Shutdown()
 	if a.APIToken() == "" {
 		t.Fatal("empty token")
 	}
@@ -45,6 +46,7 @@ func TestClearDaemonPIDIfOwnerLeavesForeignProcess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer a.Shutdown()
 	path := filepath.Join(dir, "daemon.pid")
 	if err := os.WriteFile(path, []byte("1\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -71,6 +73,7 @@ func TestNodesOmitsSyntheticAutoWithoutOutbound(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer a.Shutdown()
 	for _, n := range a.Nodes() {
 		if n.Tag == "auto" {
 			t.Fatalf("synthetic auto must not appear without an auto outbound: %+v", n)
@@ -95,6 +98,7 @@ func TestStartSessionPreservesFailureInsteadOfPersistingStoppedState(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer a.Shutdown()
 	if _, err := a.Store().Update(func(f *state.File) error {
 		f.Wanted = false
 		f.Settings.CorePath = filepath.Join(t.TempDir(), "missing-sing-box")
@@ -120,6 +124,7 @@ func TestStatusSystemProxyFollowsOSNotDiskPreference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer a.Shutdown()
 	if _, err := a.Store().Update(func(f *state.File) error {
 		f.Capture.SystemProxy = true
 		f.Wanted = false
@@ -177,6 +182,7 @@ func TestWaitBackgroundWaitsForTrackedWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer a.Shutdown()
 	started := make(chan struct{})
 	release := make(chan struct{})
 	a.runBackground(context.Background(), new(bool), func() {

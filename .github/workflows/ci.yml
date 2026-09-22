@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, "feat/**"]
   pull_request:
   workflow_dispatch:
 
@@ -84,3 +84,23 @@ jobs:
             build/Aster-macos-*.zip
             build/Aster-unsigned.pkg
           if-no-files-found: error
+      - name: Report build log on failure
+        if: failure()
+        run: |
+          if [ -f build/xcodebuild.log ]; then
+            echo "## Xcodebuild Failure Diagnostics" >> "$GITHUB_STEP_SUMMARY"
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            echo "=== EXTRACTED ERRORS ===" >> "$GITHUB_STEP_SUMMARY"
+            grep -E -C 2 "(error:|fatal error:)" build/xcodebuild.log | head -n 100 >> "$GITHUB_STEP_SUMMARY" || true
+            echo "=== LOG TAIL (last 100 lines) ===" >> "$GITHUB_STEP_SUMMARY"
+            tail -n 100 build/xcodebuild.log >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-failure-log
+          path: build/xcodebuild.log
+          if-no-files-found: ignore
+

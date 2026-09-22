@@ -38,7 +38,7 @@ public struct ConnectionSnapshot: Equatable, Sendable {
     public func applying(_ delta: ConnectionsDelta) -> Self {
         var activeByID = delta.snapshot == true
             ? [String: ConnectionItem]()
-            : Dictionary(uniqueKeysWithValues: connections.map { ($0.id, $0) })
+            : Dictionary(connections.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
         for connection in delta.upserts {
             activeByID[connection.id] = connection
         }
@@ -56,7 +56,7 @@ public struct ConnectionSnapshot: Equatable, Sendable {
     }
 
     private static func mergedRecentRequests(existing: [ConnectionItem], active: [ConnectionItem]) -> [ConnectionItem] {
-        var requestsByID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+        var requestsByID = Dictionary(existing.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
         let activeIDs = Set(active.map(\.id))
 
         for var connection in active {

@@ -153,11 +153,11 @@ func (a *App) SetMode(mode string) error {
 		return nil
 	}
 	if a.core.Running() {
-		if err := a.clash.PatchMode(clashMode(mode)); err != nil {
+		if err := a.clash.PatchMode(state.ClashMode(mode)); err != nil {
 			return err
 		}
 		if _, err := a.st.Update(func(cur *state.File) error { cur.Mode = mode; return nil }); err != nil {
-			_ = a.clash.PatchMode(clashMode(old.Mode))
+			_ = a.clash.PatchMode(state.ClashMode(old.Mode))
 			return err
 		}
 		a.hub.Broadcast("status", a.Status())
@@ -172,69 +172,55 @@ func (a *App) SetMode(mode string) error {
 }
 
 func (a *App) SelectNode(tag string) error {
-	if err := a.requireNodeProfile(); err != nil {
+	groups, err := a.StrategyGroups()
+	if err != nil {
 		return err
+	}
+	mainTag := "proxy"
+	if len(groups) > 0 {
+		mainTag = groups[0].Tag
 	}
 	realTag := tag
 	found := false
-	nodes := a.Nodes()
-	for _, n := range nodes {
-		if n.Tag == tag {
-			realTag = n.Tag
-			found = true
-			break
-		}
+	if tag == "auto" || tag == "direct" || tag == "block" || tag == "reject" {
+		found = true
 	}
 	if !found {
+		nodes := a.Nodes()
 		for _, n := range nodes {
-			if n.ID == tag || n.Name == tag || strings.HasSuffix(n.Tag, tag) || strings.HasSuffix(tag, n.Name) {
+			if n.Tag == tag {
 				realTag = n.Tag
 				found = true
 				break
+			}
+		}
+		if !found {
+			for _, n := range nodes {
+				if n.ID == tag || n.Name == tag || strings.HasSuffix(n.Tag, tag) || strings.HasSuffix(tag, n.Name) {
+					realTag = n.Tag
+					found = true
+					break
+				}
+			}
+		}
+	}
+	if !found {
+		for _, g := range groups {
+			if g.Tag == mainTag {
+				for _, m := range g.Members {
+					if m == tag {
+						realTag = m
+						found = true
+						break
+					}
+				}
 			}
 		}
 	}
 	if !found {
 		return fmt.Errorf("节点不存在: %s", tag)
 	}
-	old := a.st.Get()
-	if old.Selected == realTag {
-		return nil
-	}
-	if a.core.Running() {
-		if err := a.clash.Select("proxy", realTag); err != nil {
-			return err
-		}
-		if _, err := a.st.Update(func(cur *state.File) error {
-			cur.Selected = realTag
-			if cur.SelectorNow == nil {
-				cur.SelectorNow = map[string]string{}
-			}
-			cur.SelectorNow["proxy"] = realTag
-			cur.RecentNodes = prepend(cur.RecentNodes, realTag, 8)
-			return nil
-		}); err != nil {
-			_ = a.clash.Select("proxy", old.Selected)
-			return err
-		}
-		a.hub.Broadcast("status", a.Status())
-		return nil
-	}
-	candidate := state.CloneFile(old)
-	candidate.Selected = realTag
-	if candidate.SelectorNow == nil {
-		candidate.SelectorNow = map[string]string{}
-	}
-	candidate.SelectorNow["proxy"] = realTag
-	candidate.RecentNodes = prepend(candidate.RecentNodes, realTag, 8)
-	return a.applyAndCommitCandidate(old, candidate, func(cur *state.File) {
-		cur.Selected = realTag
-		if cur.SelectorNow == nil {
-			cur.SelectorNow = map[string]string{}
-		}
-		cur.SelectorNow["proxy"] = realTag
-		cur.RecentNodes = prepend(cur.RecentNodes, realTag, 8)
-	})
+	return a.SelectGroupNode(mainTag, realTag)
 }
 
 // applyAndCommitCandidate is the offline mutation transaction used by mode

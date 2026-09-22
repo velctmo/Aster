@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"regexp"
@@ -153,7 +154,7 @@ func redactDiagnosticText(text string) string {
 	return diagnosticURL.ReplaceAllString(text, "[URL]")
 }
 
-// GetNetworkDiagnostics 毫秒级并发探测路由、DNS 与节点三级延时
+// GetNetworkDiagnostics 毫秒级并发探测路由、DNS 与节点三级真实延时（绝无任何造假与硬编码数据）
 func (a *App) GetNetworkDiagnostics(force bool) NetworkDiagnostics {
 	a.diagnosticsMu.Lock()
 	if !force && time.Since(a.cachedDiagnosticsAt) < 5*time.Second && a.cachedDiagnostics.FetchedAt > 0 {
@@ -161,36 +162,59 @@ func (a *App) GetNetworkDiagnostics(force bool) NetworkDiagnostics {
 		a.diagnosticsMu.Unlock()
 		return res
 	}
+	if a.diagnosticsCond == nil {
+		a.diagnosticsCond = sync.NewCond(&a.diagnosticsMu)
+	}
+	for a.diagnosticsRunning {
+		a.diagnosticsCond.Wait()
+		if !force && time.Since(a.cachedDiagnosticsAt) < 5*time.Second && a.cachedDiagnostics.FetchedAt > 0 {
+			res := a.cachedDiagnostics
+			a.diagnosticsMu.Unlock()
+			return res
+		}
+	}
+	a.diagnosticsRunning = true
 	a.diagnosticsMu.Unlock()
 
+	defer func() {
+		a.diagnosticsMu.Lock()
+		a.diagnosticsRunning = false
+		if a.diagnosticsCond != nil {
+			a.diagnosticsCond.Broadcast()
+		}
+		a.diagnosticsMu.Unlock()
+	}()
+
 	f := a.st.Active()
+	routeInfo := getDefaultRouteInfo()
+	activeConfigName := "未激活配置"
+	if profile := f.ActiveProfile(); profile != nil && profile.Name != "" {
+		activeConfigName = profile.Name
+	}
 	res := NetworkDiagnostics{
-		RouteDelayMs:    1,
-		DNSDelayMs:      18,
+		RouteDelayMs:    0,
+		DNSDelayMs:      0,
 		ProxyDelayMs:    0,
 		ProxyApplicable: false,
-		NetworkType:     detectNetworkType(),
-		ConfigName:      "默认配置",
+		NetworkType:     detectNetworkType(routeInfo.iface),
+		ConfigName:      activeConfigName,
 		OutboundMode:    outboundModeZh(f.Mode),
 		FetchedAt:       time.Now().Unix(),
 	}
 
-	if profile := f.ActiveProfile(); profile != nil {
-		res.ConfigName = profile.Name
-	}
-
 	var wg sync.WaitGroup
-	var routeDelay = 1
-	var dnsDelay = 18
+	var routeDelay int
+	var dnsDelay int
 
-	// 1. 探测内网网关延时 (Route Latency: ≤1ms)
+	// 1. 真实探测内网网关延时 (Route Latency)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		gateway := getDefaultGateway()
+		gateway := routeInfo.gateway
 		if gateway != "" {
 			start := time.Now()
-			conn, err := net.DialTimeout("tcp", gateway+":53", 150*time.Millisecond)
+			// 优先尝试网关常见服务端口 53 (DNS)
+			conn, err := net.DialTimeout("tcp", net.JoinHostPort(gateway, "53"), 250*time.Millisecond)
 			if err == nil {
 				_ = conn.Close()
 				cost := int(time.Since(start).Milliseconds())
@@ -200,34 +224,49 @@ func (a *App) GetNetworkDiagnostics(force bool) NetworkDiagnostics {
 				routeDelay = cost
 				return
 			}
-			// 备用：UDP 探测
-			uConn, err2 := net.DialTimeout("udp", gateway+":53", 150*time.Millisecond)
+			// 备选端口 80 (路由器管理界面)
+			conn2, err2 := net.DialTimeout("tcp", net.JoinHostPort(gateway, "80"), 250*time.Millisecond)
 			if err2 == nil {
+				_ = conn2.Close()
+				cost := int(time.Since(start).Milliseconds())
+				if cost <= 0 {
+					cost = 1
+				}
+				routeDelay = cost
+				return
+			}
+			// 备用 UDP 探测
+			uConn, err3 := net.DialTimeout("udp", net.JoinHostPort(gateway, "53"), 250*time.Millisecond)
+			if err3 == nil {
 				_ = uConn.Close()
-				routeDelay = 1
+				cost := int(time.Since(start).Milliseconds())
+				if cost <= 0 {
+					cost = 1
+				}
+				routeDelay = cost
 				return
 			}
 		}
-		routeDelay = 1
+		routeDelay = 0
 	}()
 
-	// 2. 探测 DNS 解析延迟 (DNS Latency: 通常 10~30ms)
+	// 2. 真实探测 DNS 解析延迟 (DNS Latency)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		start := time.Now()
-		ctx, cancel := context.WithTimeout(context.Background(), 600*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
 		defer cancel()
 		_, err := net.DefaultResolver.LookupIP(ctx, "ip4", "captive.apple.com")
 		cost := int(time.Since(start).Milliseconds())
 		if err == nil && cost > 0 {
 			dnsDelay = cost
 		} else {
-			dnsDelay = 18
+			dnsDelay = 0
 		}
 	}()
 
-	// 3. 提取当前代理节点延时
+	// 3. 提取或探测代理节点真实延时
 	a.mu.Lock()
 	curDelay := a.delay
 	a.mu.Unlock()
@@ -242,7 +281,40 @@ func (a *App) GetNetworkDiagnostics(force bool) NetworkDiagnostics {
 		if curDelay > 0 {
 			proxyDelayMs = curDelay
 		} else {
-			proxyDelayMs = 45
+			activeTag := f.Selected
+			if activeTag == "" {
+				activeTag = "proxy"
+			}
+			a.mu.Lock()
+			tagDelay := a.delays[activeTag]
+			a.mu.Unlock()
+
+			if tagDelay > 0 {
+				proxyDelayMs = tagDelay
+			} else if force && a.core.Running() {
+				delayURL := strings.TrimSpace(f.Settings.DelayURL)
+				if delayURL == "" {
+					delayURL = state.DefaultDelayURL
+				}
+				timeoutMs := f.Settings.DelayTimeoutMs
+				if timeoutMs <= 0 {
+					timeoutMs = 3000
+				}
+				if d, err := a.clash.Delay(activeTag, delayURL, timeoutMs); err == nil && d > 0 {
+					proxyDelayMs = d
+					a.mu.Lock()
+					a.delay = d
+					if a.delays == nil {
+						a.delays = make(map[string]int)
+					}
+					a.delays[activeTag] = d
+					a.mu.Unlock()
+				} else {
+					proxyDelayMs = 0
+				}
+			} else {
+				proxyDelayMs = 0
+			}
 		}
 	}
 
@@ -253,15 +325,24 @@ func (a *App) GetNetworkDiagnostics(force bool) NetworkDiagnostics {
 	res.ProxyApplicable = proxyApplicable
 	res.ProxyDelayMs = proxyDelayMs
 
-	// 计算总 Internet 延迟
-	if res.ProxyApplicable && res.ProxyDelayMs > 0 {
-		res.InternetDelayMs = res.ProxyDelayMs
-	} else {
-		// 直连模式：综合路由与轻量主干延时
-		res.InternetDelayMs = res.RouteDelayMs + res.DNSDelayMs/2
-		if res.InternetDelayMs < 5 {
-			res.InternetDelayMs = 5
+	// 真实 Internet 延迟：
+	// 若走代理且代理延迟有效，以代理节点真实 RTT 为准；
+	// 若为直连模式，测量实际直连 204 往返；
+	// 未测出时严格为 0（未测速），绝不捏造假数据！
+	if res.ProxyApplicable {
+		if res.ProxyDelayMs > 0 {
+			res.InternetDelayMs = res.ProxyDelayMs
+		} else {
+			res.InternetDelayMs = 0
 		}
+	} else if f.Mode == "direct" {
+		directURL := strings.TrimSpace(f.Settings.DelayURL)
+		if directURL == "" {
+			directURL = state.DefaultDelayURL
+		}
+		res.InternetDelayMs = probeDirectDelay(directURL, 600*time.Millisecond)
+	} else {
+		res.InternetDelayMs = 0
 	}
 
 	a.diagnosticsMu.Lock()
@@ -272,45 +353,86 @@ func (a *App) GetNetworkDiagnostics(force bool) NetworkDiagnostics {
 	return res
 }
 
-func detectNetworkType() string {
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
-	defer cancel()
-	out, err := exec.CommandContext(ctx, "sh", "-c", "route get default | grep interface").Output()
-	if err == nil {
-		str := string(out)
-		if strings.Contains(str, "en0") {
-			// 检查 en0 是 Wi-Fi 还是有线网卡
-			wifiCtx, wifiCancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-			defer wifiCancel()
-			wifiOut, _ := exec.CommandContext(wifiCtx, "sh", "-c", "networksetup -getairportnetwork en0").Output()
-			if strings.Contains(string(wifiOut), "Current Wi-Fi Network") {
-				parts := strings.Split(string(wifiOut), ": ")
-				if len(parts) >= 2 {
-					ssid := strings.TrimSpace(parts[1])
-					return "Wi-Fi: " + ssid
-				}
-				return "Wi-Fi"
-			}
-			return "以太网"
-		}
-		if strings.Contains(str, "en") {
-			return "以太网"
-		}
+func probeDirectDelay(targetURL string, timeout time.Duration) int {
+	if targetURL == "" {
+		targetURL = state.DefaultDelayURL
 	}
-	return "以太网"
+	client := &http.Client{
+		Timeout: timeout,
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+		},
+	}
+	start := time.Now()
+	resp, err := client.Get(targetURL)
+	if err != nil {
+		return 0
+	}
+	_ = resp.Body.Close()
+	cost := int(time.Since(start).Milliseconds())
+	if cost <= 0 {
+		return 1
+	}
+	return cost
 }
 
-func getDefaultGateway() string {
-	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+type defaultRouteInfo struct {
+	gateway string
+	iface   string
+}
+
+func getDefaultRouteInfo() defaultRouteInfo {
+	ctx, cancel := context.WithTimeout(context.Background(), 350*time.Millisecond)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, "sh", "-c", "netstat -nr -f inet | grep default | awk '{print $2}' | head -n 1").Output()
-	if err == nil {
-		gateway := strings.TrimSpace(string(out))
-		if gateway != "" {
-			return gateway
+	out, err := exec.CommandContext(ctx, "route", "-n", "get", "default").Output()
+	if err != nil {
+		return defaultRouteInfo{}
+	}
+	var info defaultRouteInfo
+	for _, line := range strings.Split(string(out), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "gateway:") {
+			parts := strings.Fields(trimmed)
+			if len(parts) >= 2 {
+				gw := parts[1]
+				if !strings.Contains(gw, "link") {
+					info.gateway = gw
+				}
+			}
+		} else if strings.HasPrefix(trimmed, "interface:") {
+			parts := strings.Fields(trimmed)
+			if len(parts) >= 2 {
+				info.iface = parts[1]
+			}
 		}
 	}
-	return "192.168.1.1"
+	return info
+}
+
+func detectNetworkType(iface string) string {
+	if iface == "" {
+		return "未连接网络"
+	}
+	if strings.HasPrefix(iface, "pdp_ip") {
+		return "蜂窝网络"
+	}
+	if strings.HasPrefix(iface, "en") {
+		wifiCtx, wifiCancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+		defer wifiCancel()
+		wifiOut, err := exec.CommandContext(wifiCtx, "networksetup", "-getairportnetwork", iface).Output()
+		if err == nil && strings.Contains(string(wifiOut), "Current Wi-Fi Network") {
+			parts := strings.Split(string(wifiOut), ": ")
+			if len(parts) >= 2 {
+				ssid := strings.TrimSpace(parts[1])
+				if ssid != "" {
+					return "Wi-Fi: " + ssid
+				}
+			}
+			return "Wi-Fi"
+		}
+		return "以太网"
+	}
+	return iface
 }
 
 func outboundModeZh(mode string) string {

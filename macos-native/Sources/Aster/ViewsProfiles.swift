@@ -64,25 +64,31 @@ public struct ProfilesView: View {
 
             Divider().opacity(0.4)
 
-            // 错误横幅
+            // 状态与异常提示 (规范胶囊式呈现)
             if let error = state.configMutationError {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
-                    Text(error).font(.system(size: 12)).lineLimit(2)
+                HStack {
+                    InlineStatusPill(kind: .error(error), onDismiss: {
+                        state.configMutationError = nil
+                    })
                     Spacer()
-                    Button("关闭") { state.configMutationError = nil }
-                        .buttonStyle(.borderless).controlSize(.small)
                 }
-                .padding(.horizontal, 24).padding(.vertical, 9)
-                .background(Color.orange.opacity(0.1))
+                .padding(.horizontal, 24)
+                .padding(.vertical, 8)
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
 
             // 主内容区分支展示
             if activeTab == .profiles {
                 if state.configs.isEmpty {
-                    Spacer()
-                    ContentUnavailableView("暂无配置", systemImage: "doc.badge.plus", description: Text("添加 sing-box 订阅、Clash 配置或组合节点池"))
-                    Spacer()
+                    AsterEmptyState(
+                        icon: "doc.badge.plus",
+                        title: "暂无配置",
+                        subtitle: "添加 sing-box 订阅、Clash 配置或组合节点",
+                        actionTitle: "添加订阅"
+                    ) {
+                        showingAddSheet = true
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     ScrollView {
                         VStack(spacing: 12) {
@@ -115,6 +121,7 @@ public struct ConfigProfileCard: View {
     var onSwitchToOverrides: () -> Void
     @ObservedObject private var state = AsterState.shared
     @State private var isHovered = false
+    @State private var showingConfigViewer = false
 
     private var isUpdating: Bool {
         state.updatingConfigIds.contains(config.id) || state.isRefreshingAllConfigs
@@ -134,134 +141,232 @@ public struct ConfigProfileCard: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            // 第一行：状态圆标 + 配置名称 + 模式标签 + 节点摘要 + 右侧状态指示（更新中/当前生效）
-            HStack(spacing: 8) {
-                // 生效或空闲状态小圆标
+        HStack(spacing: 12) {
+            // 左侧状态指示
+            ZStack {
                 Circle()
-                    .fill(config.active ? Color.green : Color.secondary.opacity(0.35))
-                    .frame(width: 7, height: 7)
+                    .fill(config.active ? Color.green.opacity(0.15) : Color.primary.opacity(0.05))
+                    .frame(width: 34, height: 34)
+                Image(systemName: config.active ? "checkmark.circle.fill" : (config.kind == "subscription" ? "globe" : "square.stack.3d.up"))
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(config.active ? .green : .secondary)
+            }
 
-                Text(config.name)
-                    .font(.system(size: 13.5, weight: .bold))
-                    .foregroundColor(config.active ? .primary : .primary.opacity(0.88))
-                    .lineLimit(1)
+            // 中部核心元数据
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text(config.name)
+                        .font(.system(size: 13.5, weight: .bold))
+                        .foregroundColor(config.active ? .primary : .primary.opacity(0.9))
+                        .lineLimit(1)
 
-                Text(config.kind == "subscription" ? "订阅" : "节点")
-                    .font(.system(size: 9.5, weight: .semibold))
-                    .padding(.horizontal, 5.5)
-                    .padding(.vertical, 1.5)
-                    .background((config.kind == "subscription" ? Color.blue : Color.purple).opacity(0.12))
-                    .foregroundColor(config.kind == "subscription" ? .blue : .purple)
-                    .clipShape(Capsule())
+                    Text(config.kind == "subscription" ? "完整订阅" : (config.name == "Default" ? "Default" : "节点聚合"))
+                        .font(.system(size: 9.5, weight: .semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1.5)
+                        .background((config.kind == "subscription" ? Color.blue : Color.purple).opacity(0.12))
+                        .foregroundColor(config.kind == "subscription" ? .blue : .purple)
+                        .clipShape(Capsule())
 
-                Text(configSummaryText)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.secondary)
+                    Text(configSummaryText)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.secondary)
 
-                Spacer()
-
-                if isUpdating {
-                    HStack(spacing: 4) {
-                        ProgressView()
-                            .controlSize(.mini)
-                            .frame(width: 10, height: 10)
-                        Text("更新中…")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(.accentColor)
-                    }
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.accentColor.opacity(0.08))
-                    .clipShape(Capsule())
-                } else if config.active {
-                    HStack(spacing: 4) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 9))
+                    if isUpdating {
+                        HStack(spacing: 4) {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .frame(width: 10, height: 10)
+                            Text("更新中…")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.accentColor)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.accentColor.opacity(0.08))
+                        .clipShape(Capsule())
+                    } else if config.active {
                         Text("当前生效")
                             .font(.system(size: 9.5, weight: .bold))
+                            .foregroundColor(.green)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.green.opacity(0.12))
+                            .clipShape(Capsule())
                     }
-                    .foregroundColor(.green)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(Color.green.opacity(0.12))
-                    .clipShape(Capsule())
+                }
+
+                HStack(spacing: 8) {
+                    if let scriptName = boundScriptName {
+                        HStack(spacing: 3) {
+                            Image(systemName: "curlybraces")
+                                .font(.system(size: 9))
+                                .foregroundColor(.orange)
+                            Text("覆写: \(scriptName)")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(.primary.opacity(0.85))
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    }
+
+                    if !config.lastError.isEmpty {
+                        InlineStatusPill(kind: .warning(config.lastError))
+                    } else if let refresh = config.recentRefreshes?.first, refresh.at > 0 {
+                        Text("更新于 \(Date(timeIntervalSince1970: TimeInterval(refresh.at)).formatted(date: .omitted, time: .shortened))")
+                            .font(.system(size: 9.5, design: .monospaced))
+                            .foregroundColor(.secondary.opacity(0.8))
+                    }
                 }
             }
 
-            // 第二行：覆写脚本状态胶囊 + 错误或更新时间展示
+            Spacer()
+
+            // 右侧操作工具栏 (显式可点击，不再隐藏在右键)
             HStack(spacing: 8) {
-                // 覆写脚本状态展示胶囊
-                if let scriptName = boundScriptName {
-                    HStack(spacing: 4) {
-                        Image(systemName: "curlybraces")
-                            .font(.system(size: 9.5))
-                            .foregroundColor(.orange)
-                        Text("覆写: \(scriptName)")
-                            .font(.system(size: 10.5, weight: .medium))
-                            .foregroundColor(.primary.opacity(0.85))
-                            .lineLimit(1)
+                // 1. 查看配置文件 (Surge / Clash 核心功能)
+                Button(action: {
+                    showingConfigViewer = true
+                }) {
+                    Image(systemName: "doc.text.magnifyingglass")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(.exquisiteSecondary(height: 26))
+                .help("查看底层配置文件全文及节点详情")
+
+                // 2. 刷新订阅按钮
+                Button(action: {
+                    state.refreshConfig(id: config.id)
+                }) {
+                    if isUpdating {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .frame(width: 14, height: 14)
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 11, weight: .semibold))
                     }
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2.5)
-                    .background(Color.orange.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
-                } else {
-                    HStack(spacing: 4) {
-                        Image(systemName: "curlybraces")
-                            .font(.system(size: 9.5))
-                            .foregroundColor(.secondary.opacity(0.7))
-                        Text("无覆写脚本")
-                            .font(.system(size: 10))
-                            .foregroundColor(.secondary)
+                }
+                .buttonStyle(.exquisiteSecondary(height: 26))
+                .disabled(isUpdating || state.isConfigMutationInFlight)
+                .help("刷新并拉取最新订阅")
+
+                // 3. 启用配置按钮 (未激活时直观可见)
+                if !config.active {
+                    Button(action: {
+                        state.activateConfig(id: config.id)
+                    }) {
+                        Text("启用")
+                            .font(.system(size: 11.5, weight: .semibold))
                     }
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2.5)
-                    .background(Color.secondary.opacity(0.06))
-                    .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    .buttonStyle(.exquisitePrimary(height: 26, cornerRadius: AsterMetrics.radiusControl))
+                    .help("激活并切换为此配置")
                 }
 
-                Spacer()
-
-                if !config.lastError.isEmpty {
-                    HStack(spacing: 4) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(.orange)
-                            .font(.system(size: 10))
-                        Text(config.lastError)
-                            .font(.system(size: 10))
-                            .foregroundColor(.orange)
-                            .lineLimit(1)
+                // 4. 更多选项菜单
+                Menu {
+                    Button {
+                        showingConfigViewer = true
+                    } label: {
+                        Label("查看配置文件", systemImage: "doc.text.magnifyingglass")
                     }
-                } else if let refresh = config.recentRefreshes?.first, refresh.at > 0 {
-                    Text("更新于 \(Date(timeIntervalSince1970: TimeInterval(refresh.at)).formatted(date: .omitted, time: .shortened))")
-                        .font(.system(size: 9.5, design: .monospaced))
-                        .foregroundColor(.secondary.opacity(0.8))
+
+                    Divider()
+
+                    Menu {
+                        Button {
+                            bindScript(nil)
+                        } label: {
+                            if config.scriptId == nil || config.scriptId?.isEmpty == true {
+                                Label("无覆写", systemImage: "checkmark")
+                            } else {
+                                Text("无覆写")
+                            }
+                        }
+
+                        if !state.scripts.isEmpty {
+                            Divider()
+                            ForEach(state.scripts) { s in
+                                Button {
+                                    bindScript(s.id)
+                                } label: {
+                                    if config.scriptId == s.id {
+                                        Label(s.name, systemImage: "checkmark")
+                                    } else {
+                                        Text(s.name)
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("绑定覆写脚本", systemImage: "curlybraces")
+                    }
+
+                    Button {
+                        onSwitchToOverrides()
+                    } label: {
+                        Label("打开覆写管理", systemImage: "slider.horizontal.3")
+                    }
+
+                    Divider()
+
+                    Button {
+                        ClipboardHelper.copy(config.name)
+                    } label: {
+                        Label("复制配置名称", systemImage: "doc.on.doc")
+                    }
+
+                    Divider()
+
+                    Button(role: .destructive) {
+                        state.deleteConfig(id: config.id)
+                    } label: {
+                        Label("删除配置", systemImage: "trash")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 11, weight: .semibold))
                 }
+                .buttonStyle(.exquisiteSecondary(height: 26))
+                .help("更多配置操作")
             }
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.vertical, 12)
         .background {
             if config.active {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
                     .fill(Color.accentColor.opacity(0.08))
             } else {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color(NSColor.controlBackgroundColor).opacity(0.6))
+                RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
+                    .fill(.ultraThinMaterial)
             }
         }
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
                 .strokeBorder(
                     config.active ? Color.accentColor.opacity(0.4) : (isHovered ? Color.primary.opacity(0.18) : Color.primary.opacity(0.06)),
-                    lineWidth: config.active ? 1.2 : 0.8
+                    lineWidth: config.active ? 1.0 : 0.5
                 )
         )
-        .shadow(color: config.active ? Color.accentColor.opacity(0.08) : Color.black.opacity(0.02), radius: 4, y: 1.5)
-        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous))
+        .onTapGesture {
+            if !config.active {
+                state.activateConfig(id: config.id)
+            }
+        }
         .onHover { isHovered = $0 }
         .contextMenu {
+            Button {
+                showingConfigViewer = true
+            } label: {
+                Label("查看配置文件", systemImage: "doc.text.magnifyingglass")
+            }
+
+            Divider()
+
             if !config.active {
                 Button {
                     state.activateConfig(id: config.id)
@@ -318,9 +423,7 @@ public struct ConfigProfileCard: View {
             Divider()
 
             Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(config.name, forType: .string)
-                state.showToast(message: "已复制配置名称")
+                ClipboardHelper.copy(config.name)
             } label: {
                 Label("复制配置名称", systemImage: "doc.on.doc")
             }
@@ -333,18 +436,18 @@ public struct ConfigProfileCard: View {
                 Label("删除配置", systemImage: "trash")
             }
         }
+        .sheet(isPresented: $showingConfigViewer) {
+            ProfileConfigViewerSheet(profile: config)
+        }
     }
 
     private func bindScript(_ scriptId: String?) {
         Task {
             do {
                 try await state.bindScript(profileId: config.id, scriptId: scriptId)
-                let name = scriptId.flatMap { id in state.scripts.first(where: { $0.id == id })?.name } ?? "无覆写"
-                state.notify(message: "已将「\(config.name)」的覆写脚本设为「\(name)」", type: .success)
             } catch {
                 let message = "更新「\(config.name)」的覆写脚本失败：\(error.localizedDescription)"
                 state.configMutationError = message
-                state.notify(message: message, type: .error)
             }
         }
     }
@@ -368,13 +471,34 @@ public struct ConfigProfileCard: View {
     }
 }
 
-// MARK: - 全新重构的添加订阅双层分流模态 (AddSubscriptionSheet)
+// MARK: - 全新重构的添加订阅与配置模态 (AddSubscriptionSheet)
 public struct AddSubscriptionSheet: View {
     @Binding var isPresented: Bool
     @ObservedObject private var state = AsterState.shared
 
-    @State private var sourceTab = 0 // 0: 网络 URL, 1: 本地文件
-    @State private var networkMode = 0 // 0: 单订阅模式 (完整托管), 1: 节点订阅模式 (多源聚合)
+    public enum ImportMode: Int, CaseIterable {
+        case singleUrl = 0
+        case nodePool = 1
+        case localFile = 2
+
+        var title: String {
+            switch self {
+            case .singleUrl: return "单订阅托管"
+            case .nodePool: return "节点聚合池"
+            case .localFile: return "本地配置文件"
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .singleUrl: return "link.badge.plus"
+            case .nodePool: return "circle.hexagongrid.fill"
+            case .localFile: return "doc.text.fill"
+            }
+        }
+    }
+
+    @State private var importMode: ImportMode = .singleUrl
     @State private var singleUrl = ""
     @State private var multiUrls = ""
     @State private var localContent = ""
@@ -405,215 +529,149 @@ public struct AddSubscriptionSheet: View {
     }
 
     private var isValid: Bool {
-        if sourceTab == 0 {
-            if networkMode == 0 {
-                return !singleUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            } else {
-                return sourceCount > 0
-            }
-        } else {
+        switch importMode {
+        case .singleUrl:
+            return !singleUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .nodePool:
+            return sourceCount > 0
+        case .localFile:
             return !localContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
 
     private var namePlaceholder: String {
-        if sourceTab == 0 {
-            return networkMode == 0 ? "选填，未填写时自动解析域名" : "选填，默认命名为「节点订阅聚合」"
+        switch importMode {
+        case .singleUrl:
+            return "选填，未填写时自动解析域名或备注"
+        case .nodePool:
+            return "选填，默认命名为「节点订阅聚合」"
+        case .localFile:
+            return "选填，未填写时自动提取文件名"
+        }
+    }
+
+    private var detectedFormatMeta: (icon: String, text: String) {
+        let trimmed = singleUrl.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if trimmed.isEmpty {
+            return ("info.circle", "支持主流格式：Clash YAML、sing-box JSON、Base64 订阅链接等")
+        }
+        if trimmed.contains("clash") {
+            return ("bolt.horizontal", "识别为 Clash 规则订阅，导入后将自动提取节点并建立分流策略")
+        } else if trimmed.contains("sing-box") || (trimmed.hasPrefix("{") && trimmed.hasSuffix("}")) {
+            return ("shippingbox", "识别为 sing-box 原生 JSON 配置，将以完整托管模式导入")
+        } else if trimmed.contains("b64") || trimmed.contains("base64") || trimmed.contains("sip002") {
+            return ("lock", "识别为 Base64 节点订阅，将自动解码并聚合代理节点")
         } else {
-            return "选填，未填写时自动使用文件名"
+            return ("globe", "智能自适应模式：系统拉取时将自动探查格式并提取有效节点")
         }
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            // 顶栏：标题
-            HStack {
-                Text("添加订阅")
-                    .font(.system(size: 16, weight: .bold))
+        VStack(alignment: .leading, spacing: 18) {
+            // 顶栏：标题与图标
+            HStack(spacing: 12) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.accentColor.opacity(0.12))
+                        .frame(width: 38, height: 38)
+                    Image(systemName: "plus.circle.fill")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(.accentColor)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("添加配置与订阅")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundColor(.primary)
+                    Text("导入机场订阅源或本地配置，支持多协议自动识别转换")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+
                 Spacer()
             }
 
-            // 第一级来源分段：网络 URL vs 本地文件
-            Picker("", selection: $sourceTab) {
-                Text("🌐 从网络 URL 导入").tag(0)
-                Text("📁 从本地文件导入").tag(1)
-            }
-            .pickerStyle(.segmented)
-            .disabled(submitting)
-
-            // 第二级分流 / 导入内容输入区域
-            if sourceTab == 0 {
-                // 网络 URL 二级模式分段
-                VStack(alignment: .leading, spacing: 10) {
-                    Picker("", selection: $networkMode) {
-                        Text("⚡️ 单订阅模式 (完整托管)").tag(0)
-                        Text("🔗 节点订阅模式 (多源聚合)").tag(1)
+            // 模式切换器：统一选项胶囊
+            HStack(spacing: 8) {
+                ForEach(ImportMode.allCases, id: \.self) { mode in
+                    SelectionCapsule(
+                        title: mode.title,
+                        icon: mode.icon,
+                        isSelected: importMode == mode,
+                        tintColor: .accentColor
+                    ) {
+                        withAnimation(.spring(response: 0.25, dampingFraction: 0.8)) {
+                            importMode = mode
+                            errorMessage = nil
+                        }
                     }
-                    .pickerStyle(.segmented)
                     .disabled(submitting)
-
-                    // 模式说明文案
-                    HStack(spacing: 4) {
-                        Image(systemName: "info.circle")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                        Text(networkMode == 0
-                            ? "使用源订阅分组与分流规则，仅需输入 1 个链接。"
-                            : "支持多个订阅源（每行一个），仅提取节点并汇入聚合池。")
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.leading, 2)
-
-                    if networkMode == 0 {
-                        // 单订阅输入区域
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("订阅链接:")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.secondary)
-
-                            HStack(spacing: 8) {
-                                TextField("https://example.com/sub/...", text: $singleUrl)
-                                    .textFieldStyle(.roundedBorder)
-                                    .disabled(submitting)
-
-                                Button {
-                                    pasteFromClipboard()
-                                } label: {
-                                    Label("粘贴", systemImage: "doc.on.clipboard")
-                                }
-                                .buttonStyle(.exquisiteSecondary)
-                                .disabled(submitting)
-                            }
-
-                            Text("💡 支持 sing-box JSON、Clash YAML 与 Base64 订阅链接，完整保留源订阅内的策略组与分流规则。")
-                                .font(.system(size: 10.5))
-                                .foregroundColor(.secondary.opacity(0.85))
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    } else {
-                        // 节点订阅输入区域
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("订阅链接列表（每行一个）:")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(.secondary)
-
-                            TextEditor(text: $multiUrls)
-                                .font(.system(size: 12, design: .monospaced))
-                                .frame(height: 105)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: AsterMetrics.radiusControl, style: .continuous)
-                                        .stroke(Color.secondary.opacity(0.3), lineWidth: 0.8)
-                                )
-                                .clipShape(RoundedRectangle(cornerRadius: AsterMetrics.radiusControl, style: .continuous))
-                                .disabled(submitting)
-
-                            HStack(alignment: .top) {
-                                Text("💡 支持 sing-box 支持的所有解析类型（Clash YAML、sing-box JSON、Base64 等），系统将并发抓取并仅提取有效节点。")
-                                    .font(.system(size: 10.5))
-                                    .foregroundColor(.secondary.opacity(0.85))
-                                    .fixedSize(horizontal: false, vertical: true)
-
-                                Spacer(minLength: 12)
-
-                                Text("已识别 \(sourceCount) 个订阅源")
-                                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                                    .foregroundColor(sourceCount > 0 ? .accentColor : .secondary)
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.primary.opacity(0.05))
-                                    .clipShape(Capsule())
-                            }
-                        }
-                    }
-                }
-            } else {
-                // 本地文件导入区域
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("选择或拖拽本地配置文件:").font(.system(size: 11, weight: .medium)).foregroundColor(.secondary)
-
-                    ZStack {
-                        RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
-                            .strokeBorder(
-                                isDropTargeted ? Color.accentColor : Color.secondary.opacity(0.35),
-                                style: StrokeStyle(lineWidth: 1.5, dash: [5])
-                            )
-                            .background(
-                                RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
-                                    .fill(isDropTargeted ? Color.accentColor.opacity(0.06) : Color.primary.opacity(0.02))
-                            )
-
-                        VStack(spacing: 8) {
-                            if !localFileName.isEmpty {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "doc.badge.gearshape.fill")
-                                        .font(.system(size: 16))
-                                        .foregroundColor(.accentColor)
-                                    Text(localFileName)
-                                        .font(.system(size: 12, weight: .semibold))
-                                    Text("(\(Formatters.bytesString(Int64(localContent.utf8.count))))")
-                                        .font(.system(size: 10.5, design: .monospaced))
-                                        .foregroundColor(.secondary)
-                                }
-                                Button("更换文件…") { chooseLocalFile() }
-                                    .buttonStyle(.exquisiteSecondary)
-                                    .disabled(submitting)
-                            } else {
-                                Image(systemName: "square.and.arrow.down")
-                                    .font(.system(size: 24))
-                                    .foregroundColor(.secondary)
-                                Text("点击选择或将 .json / .yaml / .yml 文件拖拽至此")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.secondary)
-                                Button("选择文件…") { chooseLocalFile() }
-                                    .buttonStyle(.exquisiteSecondary)
-                                    .disabled(submitting)
-                            }
-                        }
-                        .padding(16)
-                    }
-                    .frame(height: 105)
-                    .onDrop(of: [UTType.fileURL], isTargeted: $isDropTargeted) { providers in
-                        handleDrop(providers: providers)
-                    }
                 }
             }
 
-            Divider().opacity(0.4)
+            // 模式主体区域
+            Group {
+                switch importMode {
+                case .singleUrl:
+                    singleUrlView
+                case .nodePool:
+                    nodePoolView
+                case .localFile:
+                    localFileView
+                }
+            }
 
-            // 公共通用字段：配置名称（可选）
-            VStack(alignment: .leading, spacing: 4) {
-                Text("配置名称（可选）:").font(.system(size: 11, weight: .medium)).foregroundColor(.secondary)
-                TextField(namePlaceholder, text: $name)
-                    .textFieldStyle(.roundedBorder)
+            // 通用配置与覆写设置卡片
+            VStack(alignment: .leading, spacing: 10) {
+                // 配置名称
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("配置名称（可选）")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.secondary)
+                    TextField(namePlaceholder, text: $name)
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(submitting)
+                }
+
+                // 挂载覆写脚本
+                HStack(spacing: 10) {
+                    Text("挂载覆写脚本:")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.secondary)
+                    Picker("", selection: $selectedScriptId) {
+                        Text("不启用覆写").tag("")
+                        if !state.scripts.isEmpty {
+                            Divider()
+                            ForEach(state.scripts) { s in
+                                Text(s.name).tag(s.id)
+                            }
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(maxWidth: 240)
                     .disabled(submitting)
-            }
+                    Spacer()
+                }
 
-            // 公共通用字段：挂载覆写脚本
-            HStack(spacing: 10) {
-                Text("挂载覆写脚本:").font(.system(size: 11, weight: .medium)).foregroundColor(.secondary)
-                Picker("", selection: $selectedScriptId) {
-                    Text("不启用覆写").tag("")
-                    if !state.scripts.isEmpty {
-                        Divider()
-                        ForEach(state.scripts) { s in
-                            Text(s.name).tag(s.id)
-                        }
+                Divider().opacity(0.4)
+
+                // 立即激活开关
+                Toggle(isOn: $activateImmediately) {
+                    HStack(spacing: 6) {
+                        Text("添加成功后立即激活此配置")
+                            .font(.system(size: 11.5))
+                            .foregroundColor(.primary)
+                        Text("(平滑重载当前核心)")
+                            .font(.system(size: 10.5))
+                            .foregroundColor(.secondary)
                     }
                 }
-                .labelsHidden()
-                .frame(maxWidth: 220)
-                Spacer()
-            }
-            .disabled(submitting)
-
-            // 公共通用字段：添加后立即生效开关
-            Toggle("添加后立即设为当前生效配置", isOn: $activateImmediately)
                 .toggleStyle(.checkbox)
-                .font(.system(size: 12))
                 .disabled(submitting)
+            }
+            .asterSubcard(padding: 12)
 
-            // 提交进度与状态
+            // 进度条
             if submitting {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
@@ -624,43 +682,256 @@ public struct AddSubscriptionSheet: View {
                             .foregroundColor(.secondary)
                     }
                     HStack(spacing: 6) {
-                        ProgressView().scaleEffect(0.5).frame(width: 14, height: 14)
+                        ProgressView().controlSize(.mini).frame(width: 12, height: 12)
                         Text(progressStage).font(.system(size: 11)).foregroundColor(.secondary)
                     }
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, 2)
             }
 
+            // 错误提示 (规范就地反馈)
             if let errorMessage {
-                HStack(spacing: 6) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(.red)
-                        .font(.system(size: 11))
-                    Text(errorMessage)
-                        .font(.system(size: 11))
-                        .foregroundColor(.red)
+                HStack {
+                    InlineStatusPill(kind: .error(errorMessage), onDismiss: {
+                        self.errorMessage = nil
+                    })
+                    Spacer()
                 }
+                .padding(.vertical, 2)
             }
 
             // 底部操作按钮
-            HStack {
+            HStack(spacing: 12) {
                 Spacer()
                 Button("取消") { isPresented = false }
+                    .buttonStyle(.exquisiteSecondary(height: 30, cornerRadius: AsterMetrics.radiusControl))
                     .keyboardShortcut(.cancelAction)
                     .disabled(submitting)
-                Button(submitting ? "正在导入…" : "添加订阅") { submit() }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(submitting || !isValid)
+
+                Button(action: { submit() }) {
+                    HStack(spacing: 6) {
+                        if submitting {
+                            ProgressView().controlSize(.mini).frame(width: 12, height: 12)
+                            Text("正在处理…")
+                        } else {
+                            Image(systemName: "square.and.arrow.down.fill")
+                                .font(.system(size: 11))
+                            Text("立即导入配置")
+                        }
+                    }
+                }
+                .buttonStyle(.exquisitePrimary(height: 30, cornerRadius: AsterMetrics.radiusControl))
+                .keyboardShortcut(.defaultAction)
+                .disabled(submitting || !isValid)
             }
         }
         .padding(22)
         .frame(width: 540)
+        .unifiedWindowBackdrop(material: .popover, hasHairlineBorder: true)
+    }
+
+    // MARK: - 子视图: 单订阅托管
+    private var singleUrlView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("订阅链接 (HTTP / HTTPS):")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.secondary)
+
+            HStack(spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: "link")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                    TextField("https://example.com/sub?...", text: $singleUrl)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12, design: .monospaced))
+                    if !singleUrl.isEmpty {
+                        Button {
+                            singleUrl = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(
+                    RoundedRectangle(cornerRadius: AsterMetrics.radiusControl, style: .continuous)
+                        .fill(Color(nsColor: .textBackgroundColor))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: AsterMetrics.radiusControl, style: .continuous)
+                        .stroke(Color.primary.opacity(0.12), lineWidth: 0.8)
+                )
+
+                Button {
+                    pasteFromClipboard()
+                } label: {
+                    Label("粘贴", systemImage: "doc.on.clipboard")
+                }
+                .buttonStyle(.exquisiteSecondary(height: 28, cornerRadius: AsterMetrics.radiusControl))
+                .disabled(submitting)
+            }
+
+            // 智能识别提示徽章
+            HStack(alignment: .center, spacing: 6) {
+                let meta = detectedFormatMeta
+                Image(systemName: meta.icon)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                Text(meta.text)
+                    .font(.system(size: 10.5))
+                    .foregroundColor(.secondary.opacity(0.9))
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+            }
+            .padding(.horizontal, 4)
+        }
+    }
+
+    // MARK: - 子视图: 节点聚合池
+    private var nodePoolView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("订阅链接列表（每行一个，系统将提取全部节点）：")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text("已识别 \(sourceCount) 个有效订阅源")
+                    .font(.system(size: 10.5, weight: .medium, design: .monospaced))
+                    .foregroundColor(sourceCount > 0 ? .accentColor : .secondary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.primary.opacity(0.04))
+                    .clipShape(Capsule())
+            }
+
+            TextEditor(text: $multiUrls)
+                .font(.system(size: 11.5, design: .monospaced))
+                .frame(height: 100)
+                .padding(4)
+                .background(Color(nsColor: .textBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: AsterMetrics.radiusControl, style: .continuous)
+                        .stroke(Color.primary.opacity(0.12), lineWidth: 0.8)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: AsterMetrics.radiusControl, style: .continuous))
+                .disabled(submitting)
+
+            HStack(spacing: 5) {
+                Image(systemName: "info.circle")
+                    .font(.system(size: 10.5))
+                    .foregroundColor(.secondary.opacity(0.8))
+                Text("支持 Clash YAML、Base64 等各类订阅并发提取节点。")
+                    .font(.system(size: 10.5))
+                    .foregroundColor(.secondary.opacity(0.85))
+                Spacer()
+                Button {
+                    appendFromClipboard()
+                } label: {
+                    Label("追加剪贴板", systemImage: "plus.square.on.square")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.accentColor)
+                .disabled(submitting)
+
+                if !multiUrls.isEmpty {
+                    Text("•").foregroundColor(.secondary.opacity(0.5))
+                    Button("清空") {
+                        multiUrls = ""
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .disabled(submitting)
+                }
+            }
+            .padding(.horizontal, 2)
+        }
+    }
+
+    // MARK: - 子视图: 本地配置文件
+    private var localFileView: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("选择或拖拽本地配置文件:")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.secondary)
+
+            ZStack {
+                RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
+                    .strokeBorder(
+                        isDropTargeted ? Color.accentColor : Color.primary.opacity(0.15),
+                        style: StrokeStyle(lineWidth: 1.5, dash: [5])
+                    )
+                    .background(
+                        RoundedRectangle(cornerRadius: AsterMetrics.radiusCard, style: .continuous)
+                            .fill(isDropTargeted ? Color.accentColor.opacity(0.06) : Color.primary.opacity(0.015))
+                    )
+
+                if !localFileName.isEmpty {
+                    VStack(spacing: 8) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "doc.badge.gearshape.fill")
+                                .font(.system(size: 20))
+                                .foregroundColor(.accentColor)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(localFileName)
+                                    .font(.system(size: 12.5, weight: .semibold))
+                                    .foregroundColor(.primary)
+                                HStack(spacing: 6) {
+                                    Text(Formatters.bytesString(Int64(localContent.utf8.count)))
+                                    Text("•")
+                                    Text(localFileName.hasSuffix(".json") ? "sing-box JSON" : "Clash YAML")
+                                }
+                                .font(.system(size: 10.5, design: .monospaced))
+                                .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Button("更换文件…") { chooseLocalFile() }
+                                .buttonStyle(.exquisiteSecondary(height: 26, cornerRadius: AsterMetrics.radiusControl))
+                                .disabled(submitting)
+                        }
+                        .padding(14)
+                    }
+                } else {
+                    VStack(spacing: 8) {
+                        Image(systemName: "square.and.arrow.down")
+                            .font(.system(size: 24))
+                            .foregroundColor(.secondary)
+                        Text("点击选择或将 .json / .yaml / .yml 文件拖拽至此")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                        Button("选择文件…") { chooseLocalFile() }
+                            .buttonStyle(.exquisiteSecondary(height: 26, cornerRadius: AsterMetrics.radiusControl))
+                            .disabled(submitting)
+                    }
+                    .padding(16)
+                }
+            }
+            .frame(height: 108)
+            .onDrop(of: [UTType.fileURL], isTargeted: $isDropTargeted) { providers in
+                handleDrop(providers: providers)
+            }
+        }
     }
 
     private func pasteFromClipboard() {
         if let string = NSPasteboard.general.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines), !string.isEmpty {
             singleUrl = string
+        }
+    }
+
+    private func appendFromClipboard() {
+        if let string = NSPasteboard.general.string(forType: .string)?.trimmingCharacters(in: .whitespacesAndNewlines), !string.isEmpty {
+            if multiUrls.isEmpty {
+                multiUrls = string
+            } else {
+                multiUrls += "\n" + string
+            }
         }
     }
 
@@ -700,13 +971,14 @@ public struct AddSubscriptionSheet: View {
         }
     }
 
+    @MainActor
     private func submit() {
         submitting = true
         errorMessage = nil
         progressValue = 0.2
         progressStage = "正在准备解析配置数据…"
 
-        Task {
+        Task { @MainActor in
             do {
                 let createdConfig: ConfigProfileItem
                 if let existingID = createdConfigID {
@@ -718,73 +990,64 @@ public struct AddSubscriptionSheet: View {
                         )
                     }
                     createdConfig = existingConfig
-                    await MainActor.run {
-                        progressValue = 0.7
-                        progressStage = "正在重试挂载覆写脚本…"
-                    }
+                    progressValue = 0.7
+                    progressStage = "正在重试挂载覆写脚本…"
                 } else {
-                    // 解析名称
                     var finalName = name.trimmingCharacters(in: .whitespacesAndNewlines)
 
-                    if sourceTab == 0 {
-                        if networkMode == 0 {
-                            // 单订阅模式 (完整托管)
-                            let trimmedUrl = singleUrl.trimmingCharacters(in: .whitespacesAndNewlines)
-                            guard !trimmedUrl.isEmpty else {
-                                throw NSError(domain: "Aster", code: -1, userInfo: [NSLocalizedDescriptionKey: "请输入有效的订阅链接"])
-                            }
-
-                            if finalName.isEmpty {
-                                if let parsedURL = URL(string: trimmedUrl), let fragment = parsedURL.fragment, !fragment.isEmpty,
-                                   let decoded = fragment.removingPercentEncoding, !decoded.isEmpty {
-                                    finalName = decoded
-                                } else if let host = URL(string: trimmedUrl)?.host, !host.isEmpty {
-                                    finalName = host
-                                } else {
-                                    finalName = "单订阅配置"
-                                }
-                            }
-
-                            await MainActor.run {
-                                progressValue = 0.5
-                                progressStage = "正在向订阅端拉取数据并校验规则…"
-                            }
-
-                            createdConfig = try await state.createConfigAndReturn(
-                                name: finalName,
-                                kind: "subscription",
-                                url: trimmedUrl,
-                                content: "",
-                                urls: [],
-                                activate: activateImmediately
-                            )
-                        } else {
-                            // 节点订阅模式 (多源聚合)
-                            let lines = multiUrlLines
-                            guard !lines.isEmpty else {
-                                throw NSError(domain: "Aster", code: -1, userInfo: [NSLocalizedDescriptionKey: "请至少输入一行有效的订阅链接"])
-                            }
-
-                            if finalName.isEmpty {
-                                finalName = "节点订阅聚合"
-                            }
-
-                            await MainActor.run {
-                                progressValue = 0.5
-                                progressStage = "正在并发抓取多源订阅并提取有效节点…"
-                            }
-
-                            createdConfig = try await state.createConfigAndReturn(
-                                name: finalName,
-                                kind: "nodes",
-                                url: "",
-                                content: "",
-                                urls: lines,
-                                activate: activateImmediately
-                            )
+                    switch importMode {
+                    case .singleUrl:
+                        let trimmedUrl = singleUrl.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !trimmedUrl.isEmpty else {
+                            throw NSError(domain: "Aster", code: -1, userInfo: [NSLocalizedDescriptionKey: "请输入有效的订阅链接"])
                         }
-                    } else {
-                        // 从本地文件导入
+
+                        if finalName.isEmpty {
+                            if let parsedURL = URL(string: trimmedUrl), let fragment = parsedURL.fragment, !fragment.isEmpty,
+                               let decoded = fragment.removingPercentEncoding, !decoded.isEmpty {
+                                finalName = decoded
+                            } else if let host = URL(string: trimmedUrl)?.host, !host.isEmpty {
+                                finalName = host
+                            } else {
+                                finalName = "单订阅配置"
+                            }
+                        }
+
+                        progressValue = 0.5
+                        progressStage = "正在向订阅端拉取数据并校验规则…"
+
+                        createdConfig = try await state.createConfigAndReturn(
+                            name: finalName,
+                            kind: "subscription",
+                            url: trimmedUrl,
+                            content: "",
+                            urls: [],
+                            activate: activateImmediately
+                        )
+
+                    case .nodePool:
+                        let lines = multiUrlLines
+                        guard !lines.isEmpty else {
+                            throw NSError(domain: "Aster", code: -1, userInfo: [NSLocalizedDescriptionKey: "请至少输入一行有效的订阅链接"])
+                        }
+
+                        if finalName.isEmpty {
+                            finalName = "节点订阅聚合"
+                        }
+
+                        progressValue = 0.5
+                        progressStage = "正在并发抓取多源订阅并提取有效节点…"
+
+                        createdConfig = try await state.createConfigAndReturn(
+                            name: finalName,
+                            kind: "nodes",
+                            url: "",
+                            content: "",
+                            urls: lines,
+                            activate: activateImmediately
+                        )
+
+                    case .localFile:
                         let trimmedContent = localContent.trimmingCharacters(in: .whitespacesAndNewlines)
                         guard !trimmedContent.isEmpty else {
                             throw NSError(domain: "Aster", code: -1, userInfo: [NSLocalizedDescriptionKey: "请选择包含有效配置内容的本地文件"])
@@ -799,10 +1062,8 @@ public struct AddSubscriptionSheet: View {
                             }
                         }
 
-                        await MainActor.run {
-                            progressValue = 0.5
-                            progressStage = "正在解析并进行内核规则校验…"
-                        }
+                        progressValue = 0.5
+                        progressStage = "正在解析并进行内核规则校验…"
 
                         createdConfig = try await state.createConfigAndReturn(
                             name: finalName,
@@ -819,10 +1080,8 @@ public struct AddSubscriptionSheet: View {
 
                 // 如果指定了覆写脚本，进行绑定
                 if !selectedScriptId.isEmpty {
-                    await MainActor.run {
-                        progressValue = 0.8
-                        progressStage = "正在挂载覆写脚本…"
-                    }
+                    progressValue = 0.8
+                    progressStage = "正在挂载覆写脚本…"
                     do {
                         try await state.bindScript(profileId: createdConfig.id, scriptId: selectedScriptId)
                     } catch {
@@ -834,25 +1093,381 @@ public struct AddSubscriptionSheet: View {
                     }
                 }
 
-                await MainActor.run {
-                    progressValue = 1.0
-                    progressStage = activateImmediately ? "配置已生效！" : "配置添加成功！"
-                    createdConfigID = nil
-                }
+                progressValue = 1.0
+                progressStage = activateImmediately ? "配置已生效！" : "配置添加成功！"
+                createdConfigID = nil
                 try? await Task.sleep(for: .milliseconds(300))
-                await MainActor.run {
-                    isPresented = false
-                }
+                isPresented = false
             } catch {
-                await MainActor.run {
-                    errorMessage = error.localizedDescription
-                    submitting = false
-                    progressValue = 0.0
-                    progressStage = ""
-                }
+                errorMessage = error.localizedDescription
+                submitting = false
+                progressValue = 0.0
+                progressStage = ""
             }
         }
     }
 }
 
 public typealias AddConfigSheet = AddSubscriptionSheet
+
+// MARK: - 原生高性能代码阅读器组件 (基于 NSTextView)
+public struct CodeTextViewRepresentable: NSViewRepresentable {
+    public let text: String
+
+    public init(text: String) {
+        self.text = text
+    }
+
+    public func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSTextView.scrollableTextView()
+        guard let textView = scrollView.documentView as? NSTextView else {
+            return scrollView
+        }
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.font = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular)
+        textView.textColor = NSColor.textColor
+        textView.backgroundColor = NSColor.textBackgroundColor
+        textView.drawsBackground = true
+        textView.isRichText = false
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isAutomaticTextReplacementEnabled = false
+        textView.string = text
+        scrollView.drawsBackground = true
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
+        scrollView.autohidesScrollers = true
+        return scrollView
+    }
+
+    public func updateNSView(_ nsView: NSScrollView, context: Context) {
+        if let textView = nsView.documentView as? NSTextView, textView.string != text {
+            textView.string = text
+        }
+    }
+}
+
+// MARK: - 配置文件检视器模态 (借鉴 Surge / Clash 配置文件检视体验)
+public struct ProfileConfigViewerSheet: View {
+    let profile: ConfigProfileItem
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject private var state = AsterState.shared
+
+    @State private var contentResponse: ProfileContentResponse? = nil
+    @State private var isLoading = true
+    @State private var errorMessage: String? = nil
+    @State private var searchText = ""
+    @State private var viewMode: ConfigViewMode = .full
+
+    public enum ConfigViewMode: String, CaseIterable {
+        case full = "全文查看"
+        case filtered = "过滤匹配行"
+    }
+
+    private var rawContent: String {
+        contentResponse?.content ?? ""
+    }
+
+    private var filteredLines: [(lineNum: Int, line: String)] {
+        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+        let query = searchText.lowercased()
+        let lines = rawContent.components(separatedBy: .newlines)
+        var result: [(Int, String)] = []
+        for (idx, line) in lines.enumerated() {
+            if line.lowercased().contains(query) {
+                result.append((idx + 1, line))
+            }
+        }
+        return result
+    }
+
+    private var matchCount: Int {
+        if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return 0 }
+        return filteredLines.count
+    }
+
+    public var body: some View {
+        VStack(spacing: 0) {
+            // Header Bar
+            headerBar
+            Divider().opacity(0.3)
+
+            // Info & Toolbar
+            metadataBar
+            Divider().opacity(0.2)
+
+            // Content Area
+            contentArea
+            Divider().opacity(0.3)
+
+            // Footer Bar
+            footerBar
+        }
+        .frame(minWidth: 720, idealWidth: 820, minHeight: 520, idealHeight: 620)
+        .unifiedWindowBackdrop(material: .underWindowBackground, hasHairlineBorder: true)
+        .task {
+            await loadContent()
+        }
+    }
+
+    @ViewBuilder
+    private var headerBar: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(Color.blue.opacity(0.12))
+                    .frame(width: 34, height: 34)
+                Image(systemName: "doc.text.magnifyingglass")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(.blue)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 8) {
+                    Text(profile.name)
+                        .font(.system(size: 14, weight: .bold))
+                    Text(contentResponse?.format.uppercased() ?? "CONFIG")
+                        .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.blue.opacity(0.12))
+                        .foregroundColor(.blue)
+                        .clipShape(Capsule())
+                    if let kind = contentResponse?.kind {
+                        Text(kind == "subscription" ? "完整订阅" : (kind == "nodes" ? "节点聚合" : "本地配置"))
+                            .font(.system(size: 9.5, weight: .medium))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.1))
+                            .foregroundColor(.secondary)
+                            .clipShape(Capsule())
+                    }
+                }
+                Text("实时底层配置文件与节点映射结构")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            Button("完成") {
+                dismiss()
+            }
+            .buttonStyle(.exquisitePrimary(height: 28, cornerRadius: AsterMetrics.radiusControl))
+            .keyboardShortcut(.cancelAction)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 12)
+    }
+
+    @ViewBuilder
+    private var metadataBar: some View {
+        HStack(spacing: 12) {
+            ExquisiteSearchField(placeholder: "搜索配置内容 (如 outbound, port, 节点名)…", text: $searchText, maxWidth: 300)
+
+            if !searchText.isEmpty {
+                HStack(spacing: 6) {
+                    Text("\(matchCount) 处匹配")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(matchCount > 0 ? .accentColor : .secondary)
+
+                    Picker("", selection: $viewMode) {
+                        ForEach(ConfigViewMode.allCases, id: \.self) { mode in
+                            Text(mode.rawValue).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 150)
+                }
+            }
+
+            Spacer()
+
+            if let count = contentResponse?.nodeCount, count > 0 {
+                HStack(spacing: 4) {
+                    Image(systemName: "point.3.filled.connected.trianglepath")
+                        .font(.system(size: 10))
+                        .foregroundColor(.green)
+                    Text("\(count) 节点")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .foregroundColor(.secondary)
+                }
+            }
+
+            if let path = contentResponse?.path, !path.isEmpty {
+                Button {
+                    NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                } label: {
+                    Label("在 Finder 中显示", systemImage: "folder")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .buttonStyle(.exquisiteSecondary(height: 24, cornerRadius: AsterMetrics.radiusControl))
+                .help(path)
+            }
+
+            Button {
+                exportConfigFile()
+            } label: {
+                Label("导出…", systemImage: "square.and.arrow.up")
+                    .font(.system(size: 11, weight: .medium))
+            }
+            .buttonStyle(.exquisiteSecondary(height: 24, cornerRadius: AsterMetrics.radiusControl))
+            .disabled(rawContent.isEmpty)
+            .help("导出配置文件备份到本地磁盘")
+
+            ExquisiteCopyButton(text: rawContent, title: "复制全文", copiedTitle: "已复制", height: 24)
+                .disabled(rawContent.isEmpty)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
+        .background(Color(NSColor.controlBackgroundColor).opacity(0.3))
+    }
+
+    @ViewBuilder
+    private var contentArea: some View {
+        if isLoading {
+            VStack(spacing: 12) {
+                Spacer()
+                ProgressView().controlSize(.regular)
+                Text("正在加载配置文件…")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if let error = errorMessage {
+            VStack(spacing: 12) {
+                Spacer()
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 32))
+                    .foregroundColor(.red)
+                Text("读取配置失败")
+                    .font(.system(size: 13, weight: .bold))
+                Text(error)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                Button("重试") {
+                    Task { await loadContent() }
+                }
+                .buttonStyle(.exquisiteSecondary)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if rawContent.isEmpty {
+            VStack(spacing: 8) {
+                Spacer()
+                Text("配置内容为空")
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if !searchText.isEmpty && viewMode == .filtered {
+            filteredListView
+        } else {
+            CodeTextViewRepresentable(text: rawContent)
+                .background(Color(NSColor.textBackgroundColor))
+        }
+    }
+
+    @ViewBuilder
+    private var filteredListView: some View {
+        if filteredLines.isEmpty {
+            VStack(spacing: 8) {
+                Spacer()
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 24))
+                    .foregroundColor(.secondary.opacity(0.5))
+                Text("无匹配行")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(filteredLines, id: \.lineNum) { item in
+                        HStack(alignment: .top, spacing: 12) {
+                            Text("\(item.lineNum)")
+                                .font(.system(size: 11, weight: .regular, design: .monospaced))
+                                .foregroundColor(.secondary.opacity(0.6))
+                                .frame(width: 44, alignment: .trailing)
+                            Text(item.line)
+                                .font(.system(size: 11.5, weight: .regular, design: .monospaced))
+                                .foregroundColor(.primary)
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(.vertical, 2)
+                        .padding(.horizontal, 10)
+                        .background(Color.primary.opacity(0.02))
+                        .cornerRadius(3)
+                    }
+                }
+                .padding(12)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var footerBar: some View {
+        HStack(spacing: 12) {
+            if let path = contentResponse?.path, !path.isEmpty {
+                Image(systemName: "doc.plaintext")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Text(path)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            } else if let url = contentResponse?.url, !url.isEmpty {
+                Image(systemName: "link")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                Text(url)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer()
+
+            let totalLines = rawContent.components(separatedBy: .newlines).count
+            Text("\(totalLines) 行 · \(rawContent.utf8.count) 字节")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(.secondary)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    private func loadContent() async {
+        isLoading = true
+        errorMessage = nil
+        do {
+            contentResponse = try await state.fetchProfileContent(id: profile.id)
+            isLoading = false
+        } catch {
+            errorMessage = error.localizedDescription
+            isLoading = false
+        }
+    }
+
+    private func exportConfigFile() {
+        guard !rawContent.isEmpty else { return }
+        let savePanel = NSSavePanel()
+        savePanel.canCreateDirectories = true
+        let ext = (contentResponse?.format ?? "json").lowercased()
+        savePanel.nameFieldStringValue = "\(profile.name).\(ext)"
+        if let utType = UTType(filenameExtension: ext) {
+            savePanel.allowedContentTypes = [utType]
+        }
+        if savePanel.runModal() == .OK, let targetURL = savePanel.url {
+            try? rawContent.write(to: targetURL, atomically: true, encoding: .utf8)
+        }
+    }
+}

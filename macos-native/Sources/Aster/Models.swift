@@ -43,7 +43,7 @@ public struct AppStatus: Codable, Equatable, Sendable {
         delayMs: 0,
         upload: 0,
         download: 0,
-        coreVersion: "Sing-box 官方内核",
+        coreVersion: "sing-box 官方内核",
         hasNodes: false,
         recentNodes: [],
         mixedPort: 6780,
@@ -131,6 +131,18 @@ public struct ConfigProfileItem: Codable, Identifiable, Hashable, Sendable {
     public var recentRefreshes: [RefreshEventItem]?
     public var sources: [ConfigSourceSummary]?
     public var inboundSummary: ImportedInboundSummary?
+}
+
+public struct ProfileContentResponse: Codable, Hashable, Sendable {
+    public let id: String
+    public let name: String
+    public let kind: String
+    public let content: String
+    public let format: String
+    public let path: String?
+    public let url: String?
+    public let nodeCount: Int
+    public let updatedAt: Int64
 }
 
 public struct ScriptItem: Codable, Identifiable, Hashable, Sendable {
@@ -279,6 +291,57 @@ public struct RuleItem: Codable, Identifiable, Hashable, Sendable {
     public var hits: Int?
 }
 
+public struct RuleEvaluateResult: Codable, Equatable, Sendable {
+    public let target: String
+    public let matched: Bool
+    public let ruleType: String
+    public let payload: String
+    public let outbound: String
+    public let selectedNode: String
+    public let evaluationTimeMs: Double
+
+    public init(
+        target: String,
+        matched: Bool,
+        ruleType: String,
+        payload: String,
+        outbound: String,
+        selectedNode: String,
+        evaluationTimeMs: Double
+    ) {
+        self.target = target
+        self.matched = matched
+        self.ruleType = ruleType
+        self.payload = payload
+        self.outbound = outbound
+        self.selectedNode = selectedNode
+        self.evaluationTimeMs = evaluationTimeMs
+    }
+}
+
+// MARK: - 4. 连接诊断模型
+public struct ConnectionDiagnosticsItem: Codable, Equatable, Hashable, Sendable {
+    public var durationMs: Int64?
+    public var speedIn: Int64?
+    public var speedOut: Int64?
+    public var closeReason: String?
+    public var isFailed: Bool?
+
+    public init(
+        durationMs: Int64? = nil,
+        speedIn: Int64? = nil,
+        speedOut: Int64? = nil,
+        closeReason: String? = nil,
+        isFailed: Bool? = nil
+    ) {
+        self.durationMs = durationMs
+        self.speedIn = speedIn
+        self.speedOut = speedOut
+        self.closeReason = closeReason
+        self.isFailed = isFailed
+    }
+}
+
 // MARK: - 5. 活跃连接模型
 public struct ConnectionItem: Codable, Identifiable, Equatable, Sendable {
     public var id: String
@@ -290,6 +353,7 @@ public struct ConnectionItem: Codable, Identifiable, Equatable, Sendable {
     public var rulePayload: String?
     public var metadata: ConnectionMetadata?
     public var isClosed: Bool?
+    public var diagnostics: ConnectionDiagnosticsItem?
 
     public init(
         id: String,
@@ -300,7 +364,8 @@ public struct ConnectionItem: Codable, Identifiable, Equatable, Sendable {
         rule: String? = nil,
         rulePayload: String? = nil,
         metadata: ConnectionMetadata? = nil,
-        isClosed: Bool? = false
+        isClosed: Bool? = false,
+        diagnostics: ConnectionDiagnosticsItem? = nil
     ) {
         self.id = id
         self.upload = upload
@@ -311,6 +376,7 @@ public struct ConnectionItem: Codable, Identifiable, Equatable, Sendable {
         self.rulePayload = rulePayload
         self.metadata = metadata
         self.isClosed = isClosed
+        self.diagnostics = diagnostics
     }
 
     public var effectiveProcess: String {
@@ -450,7 +516,7 @@ public struct NetworkDiagnostics: Codable, Equatable, Sendable {
         proxyDelayMs: 0,
         proxyApplicable: false,
         networkType: "网络就绪",
-        configName: "默认配置",
+        configName: "未激活配置",
         outboundMode: "直接连接",
         fetchedAt: 0
     )
@@ -506,3 +572,99 @@ public struct WebDAVConfig: Codable, Equatable, Sendable {
         self.lastBackupAt = lastBackupAt
     }
 }
+
+// MARK: - 12. 主窗口导航选项卡
+public enum SidebarTab: String, CaseIterable, Identifiable, Sendable {
+    case control = "控制台"
+    case activity = "活动"
+    case nodes = "节点"
+    case rules = "规则"
+    case configuration = "配置"
+    case settings = "设置"
+
+    public var id: String { rawValue }
+
+    public var icon: String {
+        switch self {
+        case .control: return "slider.horizontal.3"
+        case .activity: return "waveform.path.ecg"
+        case .nodes: return "network"
+        case .rules: return "arrow.triangle.branch"
+        case .configuration: return "doc.badge.gearshape"
+        case .settings: return "gearshape.fill"
+        }
+    }
+
+    public var group: String {
+        switch self {
+        case .control, .activity: return "运行"
+        case .nodes, .rules: return "分流"
+        case .configuration, .settings: return "管理"
+        }
+    }
+}
+
+// MARK: - 13. 全局出站分流模式
+public enum AppMode: String, CaseIterable, Identifiable, Sendable {
+    case rule = "rule"
+    case global = "global"
+    case direct = "direct"
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .rule: return "规则判定"
+        case .global: return "全局代理"
+        case .direct: return "直接连接"
+        }
+    }
+
+    public var code: String {
+        switch self {
+        case .rule: return "RULE"
+        case .global: return "GLOBAL"
+        case .direct: return "DIRECT"
+        }
+    }
+
+    public var icon: String {
+        switch self {
+        case .rule: return "arrow.triangle.branch"
+        case .global: return "globe.asia.australia.fill"
+        case .direct: return "bolt.horizontal.fill"
+        }
+    }
+
+    public var description: String {
+        switch self {
+        case .rule: return "规则判定：依据分流规则自动判定代理直连或阻断"
+        case .global: return "全局代理：全部流量经由当前选中的代理节点转发"
+        case .direct: return "直接连接：全部流量直接发起请求，不经过任何代理"
+        }
+    }
+
+    public static func from(string: String) -> AppMode {
+        AppMode(rawValue: string) ?? .rule
+    }
+}
+
+// MARK: - 14. 延迟分级模型
+public enum LatencyGrade: Sendable {
+    case testing
+    case timeout
+    case untested
+    case fast
+    case medium
+    case slow
+
+    public static func grade(delayMs: Int, isTesting: Bool = false) -> LatencyGrade {
+        if isTesting { return .testing }
+        if delayMs < 0 { return .timeout }
+        if delayMs == 0 { return .untested }
+        if delayMs <= 150 { return .fast }
+        if delayMs <= 500 { return .medium }
+        return .slow
+    }
+}
+

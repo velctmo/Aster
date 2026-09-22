@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-09-20
+
+### Added
+
+- **Architectural Governance Charter (`AGENT.md`)**:
+  - Established strict engineering rules, single-source-of-truth invariants, zero-dead-code policies, and automated verification requirements.
+- **Celestial Obsidian Glass UI Overhaul**:
+  - Introduced `ElevatedGlassCard` and standardized 12pt continuous curvature (`AsterMetrics.cardCornerRadius = 12`).
+  - Implemented `StatusBeaconDot` breathing status beacon with live pulse indicators for core connectivity.
+  - Re-engineered Hero Command Deck in `ViewsOverview.swift` with Morandi traffic telemetry indicators (`TrafficColors.up`/`down`).
+  - Redesigned Sidebar Brand Header in `ViewsMain.swift` featuring real-time daemon heartbeat and sleek typography.
+- **Extended Protocol Parser & Validation Suite**:
+  - Full schema compliance for WireGuard, Hysteria 2, TUIC v5, ShadowTLS, Trojan, VLESS, and Shadowsocks.
+  - Deep parameter parsing including flow control, obfuscation, and MTU settings.
+
+### Changed
+
+- **Standardized Default Profile (`Default`)**:
+  - Replaced legacy Chinese name "节点池" with standard identifier `Default` across Go backend (`DefaultProfileName = "Default"`, automatic migration in `mergeDefaults`) and macOS native views.
+- **Unified Single-Source-of-Truth Architecture**:
+  - Consolidated node sanitization into `sub.CleanAndFilterNodes`, eliminating divergent regex passes.
+  - Unified routing mode conversions in `state.ClashMode` across daemon and UI boundaries.
+  - Streamlined `SelectGroupNode` with atomic candidate state transactions and immediate Clash API synchronization.
+- **Build & Packaging Scripts**:
+  - `build_aster_mac.sh`: Added CLT binary fallback when full Xcode IDE toolchain is not active.
+  - `build_aster_pkg.sh`: Enforced `COPYFILE_DISABLE=1` to eliminate macOS Sequoia AppleDouble (`._*`) pollution from root payload archives.
+
+### Fixed
+
+- **Accurate Latency Telemetry**:
+  - Fixed false timeout reporting in delay testing; failed tests return `-1` with unambiguous timeout/error status instead of misleading fallback values.
+- **Xcode Project Cleanliness**:
+  - Purged obsolete `Views.swift` file and removed orphaned PBXBuildFile references from `project.pbxproj`.
+
+### Removed
+
+- Deprecated legacy `Views.swift` monolith.
+- Redundant mode string converters and orphaned node filter functions.
+
 ## [1.1.0] - 2026-09-11
 
 ### Changed

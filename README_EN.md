@@ -32,22 +32,28 @@ Aster is a native macOS proxy utility focused on minimal resource usage, fluid s
 - **Ultra-Low Footprint**: Resident memory strictly within **30MB ~ 50MB**; the native glass floating speed monitor uses ~**0% idle CPU**.
 - **Intuitive Telemetry**: Comprehensive Bento dashboard displaying network topology, 3-tier latency breakdowns, and 24-hour traffic waveforms.
 - **Zero-SUID Security**: Secure root `launchd` helper using restricted Unix socket and console UID validation for passwordless TUN switching.
+- **Celestial Obsidian Aesthetics**: Modern Celestial Obsidian Glass design system with standardized 12pt continuous curvature cards and a live breathing status beacon.
 
 ---
 
 ## ✨ Key Features
 
+- **🌌 Celestial Obsidian Native UI**:
+  - **Hero Command Deck**: Central control deck with `StatusBeaconDot` pulse beacon mapping core engine heartbeat in real time;
+  - **Elevated Glass Card**: 12pt continuous curvature cards with Morandi network telemetry accents (`TrafficColors.up`/`down`);
+  - **Native Menu Bar & Streaming UX**: Modern `NSPopover` keeps delay tests open while latencies light up progressively via WebSocket;
+  - Global shortcuts: `⌘M` (Main Window), `⌘D` (Inspector), `⌘S` (System Proxy), `⌘E` (Enhanced Mode), `⌘C` (Copy Terminal Proxy Exports).
 - **📊 Network Topology & Bento Dashboard**:
   - Live network interface status, outbound mode switching, and real local IP vs proxy egress IP comparison;
   - Concurrent latency probes for Gateway, recursive DNS, and proxy endpoints in one view;
   - Real-time millisecond upload/download rate oscilloscopes and 24-hour multi-dimensional traffic histograms.
-- **⚡️ Native Menu Bar & Streaming UX**:
-  - Built on modern `NSPopover`: delay tests keep the popover open while latency lights up progressively via WebSocket;
-  - Live top network-active macOS apps with local high-resolution icons;
-  - Global shortcuts: `⌘M` (Main Window), `⌘D` (Inspector), `⌘S` (System Proxy), `⌘E` (Enhanced Mode), `⌘C` (Copy Terminal Proxy Exports).
-- **🔍 Standalone Packet Inspector (`⌘D`)**:
-  - 10-column high-density audit table filterable by client application or target hostname;
+- **🔍 Standalone Packet Inspector & Rule Evaluator (`⌘D`)**:
+  - 10-column high-density audit table with dedicated connection detail drawer;
+  - Built-in **Rule Evaluator** simulation engine: test domain/IP/process routing matches and preview outbound resolutions;
   - Right-click any connection to immediately inject permanent DIRECT / PROXY / REJECT routing rules.
+- **🌐 Comprehensive Protocol Stack**:
+  - Full sing-box 1.14+ schema alignment for WireGuard, Hysteria 2 (obfuscation/bandwidth), TUIC v5, ShadowTLS, VLESS, Trojan, and Shadowsocks;
+  - Unified `Default` profile dataset with multi-source subscription aggregation and automatic node sanitation.
 - **🛡️ Industrial-Grade Privilege Model**:
   - After installing the network component (`.pkg`) once, toggling TUN mode requires no administrator password prompts;
   - Strictly limited to the console user UID with a 20-second lease auto-shutdown safety mechanism.
@@ -110,6 +116,12 @@ make pkg
 # Run application
 make run
 ```
+
+---
+
+## 📐 Architecture & Development Governance
+
+Aster enforces strict architectural constraints (single source of truth, zero dead-code duplication, atomic state transitions, and deadlock-free concurrencies). All ongoing development and feature additions adhere to the [AGENT.md](AGENT.md) governance charter.
 
 ---
 

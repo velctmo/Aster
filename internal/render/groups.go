@@ -166,3 +166,47 @@ func expandLeaves(tag string, byTag map[string]outboundMeta, visiting map[string
 	}
 	return leaves, nil
 }
+
+// ExtractedNode describes a leaf proxy outbound present in a sing-box configuration document.
+type ExtractedNode struct {
+	Tag      string `json:"tag"`
+	Protocol string `json:"protocol"`
+	Server   string `json:"server,omitempty"`
+}
+
+// ExtractNodesFromConfig parses a raw sing-box JSON configuration document and returns
+// all leaf proxy outbounds/endpoints (ignoring selector/urltest/direct/block/dns).
+func ExtractNodesFromConfig(config []byte) []ExtractedNode {
+	var document struct {
+		Outbounds []struct {
+			Type   string `json:"type"`
+			Tag    string `json:"tag"`
+			Server string `json:"server"`
+		} `json:"outbounds"`
+		Endpoints []struct {
+			Type string `json:"type"`
+			Tag  string `json:"tag"`
+		} `json:"endpoints"`
+	}
+	if err := json.Unmarshal(config, &document); err != nil {
+		return nil
+	}
+	var out []ExtractedNode
+	seen := map[string]bool{}
+	for _, o := range document.Outbounds {
+		if o.Tag == "" || isStrategyOutbound(o.Type) || isSpecialOutbound(o.Type) || isSpecialTag(o.Tag) || seen[o.Tag] {
+			continue
+		}
+		seen[o.Tag] = true
+		out = append(out, ExtractedNode{Tag: o.Tag, Protocol: o.Type, Server: o.Server})
+	}
+	for _, ep := range document.Endpoints {
+		if ep.Tag == "" || isStrategyOutbound(ep.Type) || isSpecialOutbound(ep.Type) || isSpecialTag(ep.Tag) || seen[ep.Tag] {
+			continue
+		}
+		seen[ep.Tag] = true
+		out = append(out, ExtractedNode{Tag: ep.Tag, Protocol: ep.Type})
+	}
+	return out
+}
+

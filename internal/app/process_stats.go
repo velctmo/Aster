@@ -39,18 +39,7 @@ func (a *App) UpdateProcessStats(conns []clash.Connection) []ProcessTrafficStat 
 	procPaths := make(map[string]string)
 
 	for _, c := range conns {
-		name := strings.TrimSpace(c.Metadata.Process)
-		if name == "" {
-			if c.Metadata.ProcessPath != "" {
-				parts := strings.Split(c.Metadata.ProcessPath, "/")
-				name = parts[len(parts)-1]
-			}
-		}
-		if name == "" {
-			name = "系统网络服务"
-		}
-		name = cleanProcessName(name)
-
+		name := ResolveProcessName(c.Metadata.Process, c.Metadata.ProcessPath)
 		procUploads[name] += c.Upload
 		procDownloads[name] += c.Download
 		procCounts[name]++
@@ -121,14 +110,34 @@ func (a *App) UpdateProcessStats(conns []clash.Connection) []ProcessTrafficStat 
 	return append([]ProcessTrafficStat(nil), results...)
 }
 
+// ResolveProcessName standardizes extracting and cleaning the process name from connection metadata.
+func ResolveProcessName(process, processPath string) string {
+	name := strings.TrimSpace(process)
+	if name == "" && processPath != "" {
+		parts := strings.Split(processPath, "/")
+		lastPart := parts[len(parts)-1]
+		if idx := strings.Index(lastPart, " ("); idx != -1 {
+			lastPart = lastPart[:idx]
+		}
+		name = lastPart
+	}
+	if name == "" {
+		return "系统网络服务"
+	}
+	return cleanProcessName(name)
+}
+
 func cleanProcessName(raw string) string {
 	raw = strings.TrimSuffix(raw, ".app")
 	lower := strings.ToLower(raw)
 	if strings.Contains(lower, "google chrome") {
 		return "Google Chrome"
 	}
-	if strings.Contains(lower, "telegram") {
+	if strings.Contains(lower, "telegram lite") {
 		return "Telegram Lite"
+	}
+	if strings.Contains(lower, "telegram") {
+		return "Telegram"
 	}
 	if strings.Contains(lower, "dingtalk") {
 		return "钉钉"

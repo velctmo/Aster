@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -60,6 +61,9 @@ func (a *App) Profiles() []ProfileJSON {
 		n := len(p.ManualNodes)
 		for _, source := range p.Sources {
 			n += len(source.Nodes)
+		}
+		if p.Kind == state.ProfileKindSubscription && n == 0 && len(p.Config) > 0 {
+			n = len(render.ExtractNodesFromConfig(p.Config))
 		}
 		candidate := state.CloneFile(f)
 		candidate.ActiveConfigID = p.ID
@@ -161,10 +165,10 @@ func (a *App) CreateSubscriptionProfile(name, source, content string) error {
 	source = strings.TrimSpace(source)
 	content = strings.TrimSpace(content)
 	if source == "" && content == "" {
-		return fmt.Errorf("请选择本地 JSON 或输入订阅 URL")
+		return fmt.Errorf("请选择本地 JSON/YAML 或输入订阅 URL")
 	}
 	if source != "" && content != "" {
-		return fmt.Errorf("订阅模式只能选择本地 JSON 或订阅 URL 其中一种来源")
+		return fmt.Errorf("订阅模式只能选择本地配置文件或订阅 URL 其中一种来源")
 	}
 	if source != "" {
 		if err := validHTTPURL(source); err != nil {
@@ -177,22 +181,81 @@ func (a *App) CreateSubscriptionProfile(name, source, content string) error {
 		content = meta.Body
 		name = profileName(name, meta.Name)
 	}
+
+	// 1. 尝试作为原生 sing-box JSON 托管配置导入
 	cfg, err := validSingBoxConfig(content)
-	if err != nil {
-		return err
+	if err == nil {
+		p := state.ConfigProfile{
+			ID:        state.NewID(),
+			Name:      profileName(name, "sing-box 配置"),
+			Kind:      state.ProfileKindSubscription,
+			Source:    source,
+			Config:    cfg,
+			UpdatedAt: time.Now().Unix(),
+			Revision:  1,
+		}
+		state.HydrateImportedCapabilities(&p)
+		_, updateErr := a.st.Update(func(cur *state.File) error {
+			cur.Profiles = append(cur.Profiles, p)
+			return nil
+		})
+		return updateErr
 	}
-	p := state.ConfigProfile{ID: state.NewID(), Name: profileName(name, "sing-box 配置"), Kind: state.ProfileKindSubscription, Source: source, Config: cfg, UpdatedAt: time.Now().Unix(), Revision: 1}
-	state.HydrateImportedCapabilities(&p)
-	_, err = a.st.Update(func(cur *state.File) error {
+
+	// 2. 若非 sing-box JSON，自动适配为节点配置（支持 Clash YAML、Base64 节点列表等）
+	parsed, parseErr := sub.Parse(content)
+	if parseErr != nil || len(parsed.Nodes) == 0 {
+		return fmt.Errorf("无法识别配置或订阅内容：既不是合法的 sing-box JSON，也未解析出有效代理节点: %v", err)
+	}
+	cleanNodes := sub.CleanAndFilterNodes(parsed.Nodes, "")
+	if len(cleanNodes) == 0 {
+		return fmt.Errorf("未解析到有效代理节点（可能包含纯广告或已失效）")
+	}
+
+	if source != "" {
+		// 远程单订阅（如 Clash YAML 或 Base64 订阅源）
+		p := state.ConfigProfile{
+			ID:        state.NewID(),
+			Name:      profileName(name, "订阅聚合"),
+			Kind:      state.ProfileKindNodes,
+			UpdatedAt: time.Now().Unix(),
+			Revision:  1,
+			Sources: []state.ConfigSource{
+				{
+					ID:        state.NewID(),
+					URL:       source,
+					Nodes:     cleanNodes,
+					UpdatedAt: time.Now().Unix(),
+				},
+			},
+		}
+		appendRefreshEvent(&p, p.Sources[0].ID, "succeeded", len(cleanNodes), nil)
+		_, updateErr := a.st.Update(func(cur *state.File) error {
+			cur.Profiles = append(cur.Profiles, p)
+			return nil
+		})
+		return updateErr
+	}
+
+	// 本地文件导入（如本地 Clash YAML 或 URI 列表文件）
+	p := state.ConfigProfile{
+		ID:          state.NewID(),
+		Name:        profileName(name, "本地节点"),
+		Kind:        state.ProfileKindNodes,
+		UpdatedAt:   time.Now().Unix(),
+		Revision:    1,
+		ManualNodes: cleanNodes,
+	}
+	_, updateErr := a.st.Update(func(cur *state.File) error {
 		cur.Profiles = append(cur.Profiles, p)
 		return nil
 	})
-	return err
+	return updateErr
 }
 
 func (a *App) CreateNodeProfile(name string, urls []string) error {
 	seen := map[string]bool{}
-	p := state.ConfigProfile{ID: state.NewID(), Name: profileName(name, "节点池"), Kind: state.ProfileKindNodes, UpdatedAt: time.Now().Unix(), Revision: 1}
+	p := state.ConfigProfile{ID: state.NewID(), Name: profileName(name, state.DefaultProfileName), Kind: state.ProfileKindNodes, UpdatedAt: time.Now().Unix(), Revision: 1}
 	for _, raw := range urls {
 		raw = strings.TrimSpace(raw)
 		if raw == "" || seen[raw] {
@@ -231,56 +294,9 @@ func (a *App) ActivateProfile(id string) error {
 	}
 	candidate := state.CloneFile(f)
 	candidate.ActiveConfigID = id
-	if f.Wanted {
-		config, err := render.Config(candidate, a.st.Dir())
-		if err != nil {
-			return err
-		}
-		bin, err := core.BinaryFor(candidate)
-		if err != nil {
-			return err
-		}
-		path := filepath.Join(a.st.Dir(), "config.candidate.json")
-		if err := os.WriteFile(path, config, 0o600); err != nil {
-			return err
-		}
-		defer os.Remove(path)
-		if err := core.ValidateConfig(bin, path); err != nil {
-			return err
-		}
-	}
-	if !f.Wanted {
-		if err := a.writeConfig(candidate); err != nil {
-			return err
-		}
-		if _, err := a.st.Update(func(cur *state.File) error { cur.ActiveConfigID = id; return nil }); err != nil {
-			if restoreErr := a.writeConfig(f); restoreErr != nil {
-				return fmt.Errorf("保存活动配置失败: %v；恢复旧渲染配置失败: %w", err, restoreErr)
-			}
-			return fmt.Errorf("保存活动配置失败，已恢复旧渲染配置: %w", err)
-		}
-		return nil
-	}
-	// Do not commit the active ID until the candidate has started.  If the
-	// restart fails after the old core has been stopped, immediately restore the
-	// old rendered config and process before returning the failure.
-	// A running core with the same privilege boundary can reload in place. In
-	// particular, a TUN-to-TUN profile switch keeps the administrator-authorized
-	// process alive and only sends it the rendered configuration reload signal.
-	if err := a.apply(candidate, !a.core.CanReload(candidate)); err != nil {
-		restoreErr := a.apply(f, true)
-		if restoreErr != nil {
-			return fmt.Errorf("切换配置失败: %v；恢复旧配置失败: %w", err, restoreErr)
-		}
-		return fmt.Errorf("切换配置失败，已恢复旧配置: %w", err)
-	}
-	if _, err := a.st.Update(func(cur *state.File) error { cur.ActiveConfigID = id; return nil }); err != nil {
-		if restoreErr := a.apply(f, true); restoreErr != nil {
-			return fmt.Errorf("保存活动配置失败: %v；恢复旧配置失败: %w", err, restoreErr)
-		}
-		return fmt.Errorf("保存活动配置失败，已恢复旧配置: %w", err)
-	}
-	return nil
+	return a.applyAndCommitCandidateWithRestart(f, candidate, !a.core.CanReload(candidate), func(cur *state.File) {
+		cur.ActiveConfigID = id
+	})
 }
 
 func (a *App) DeleteProfile(id string) error {
@@ -514,6 +530,93 @@ func replaceProfileInFile(f *state.File, id string, profile state.ConfigProfile)
 	return false
 }
 
+// ProfileContentJSON exposes the inspectable concrete configuration content and file metadata.
+type ProfileContentJSON struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	Format    string `json:"format"`
+	Content   string `json:"content"`
+	Path      string `json:"path,omitempty"`
+	URL       string `json:"url,omitempty"`
+	NodeCount int    `json:"nodeCount"`
+	UpdatedAt int64  `json:"updatedAt"`
+}
+
+// ProfileContent returns the formatted/beautified configuration content and filesystem paths for inspection.
+func (a *App) ProfileContent(id string) (*ProfileContentJSON, error) {
+	f := a.st.Get()
+	var target *state.ConfigProfile
+	for i := range f.Profiles {
+		if f.Profiles[i].ID == id {
+			target = &f.Profiles[i]
+			break
+		}
+	}
+	if target == nil {
+		return nil, fmt.Errorf("配置不存在: %s", id)
+	}
+	nodeCount := len(target.ManualNodes)
+	for _, source := range target.Sources {
+		nodeCount += len(source.Nodes)
+	}
+	var sourceURL string
+	if target.Source != "" {
+		sourceURL = target.Source
+	} else if len(target.Sources) > 0 {
+		sourceURL = target.Sources[0].URL
+	}
+	format := "json"
+	var contentStr string
+	if target.Kind == state.ProfileKindSubscription {
+		if nodeCount == 0 && len(target.Config) > 0 {
+			nodeCount = len(render.ExtractNodesFromConfig(target.Config))
+		}
+		var pretty bytes.Buffer
+		if err := json.Indent(&pretty, target.Config, "", "  "); err == nil {
+			contentStr = pretty.String()
+		} else {
+			contentStr = string(target.Config)
+		}
+	} else {
+		candidate := state.CloneFile(f)
+		candidate.ActiveConfigID = target.ID
+		rendered, err := render.Config(candidate, a.st.Dir())
+		if err != nil {
+			return nil, fmt.Errorf("渲染配置失败: %w", err)
+		}
+		var pretty bytes.Buffer
+		if err := json.Indent(&pretty, rendered, "", "  "); err == nil {
+			contentStr = pretty.String()
+		} else {
+			contentStr = string(rendered)
+		}
+	}
+	filePath := filepath.Join(a.st.Dir(), "profiles", target.ID+".json")
+	if _, err := os.Stat(filePath); err != nil {
+		filePath = ""
+	}
+	configPath := a.st.ConfigPath()
+	if _, err := os.Stat(configPath); err != nil {
+		configPath = ""
+	}
+	path := filePath
+	if path == "" {
+		path = configPath
+	}
+	return &ProfileContentJSON{
+		ID:        target.ID,
+		Name:      target.Name,
+		Kind:      target.Kind,
+		Format:    format,
+		Content:   contentStr,
+		Path:      path,
+		URL:       sourceURL,
+		NodeCount: nodeCount,
+		UpdatedAt: target.UpdatedAt,
+	}, nil
+}
+
 func (a *App) RefreshAllProfiles() (int, error) {
 	return a.refreshAllProfiles(context.Background())
 }
@@ -594,16 +697,34 @@ func refreshSubscriptionProfile(ctx context.Context, p *state.ConfigProfile) (in
 		return 0, err
 	}
 	cfg, err := validSingBoxConfig(meta.Body)
-	if err != nil {
-		p.LastError = err.Error()
-		appendRefreshEvent(p, "subscription", "failed", 0, err)
-		return 0, err
+	if err == nil {
+		p.Config, p.LastError = cfg, ""
+		state.TouchProfile(p)
+		state.HydrateImportedCapabilities(p)
+		appendRefreshEvent(p, "subscription", "succeeded", 0, nil)
+		return 1, nil
 	}
-	p.Config, p.LastError = cfg, ""
-	state.TouchProfile(p)
-	state.HydrateImportedCapabilities(p)
-	appendRefreshEvent(p, "subscription", "succeeded", 0, nil)
-	return 1, nil
+	// 若订阅源更新为了 Clash YAML 或 Base64 节点池，自适应切换为节点池模式
+	if parsed, parseErr := sub.Parse(meta.Body); parseErr == nil && len(parsed.Nodes) > 0 {
+		cleaned := sub.CleanAndFilterNodes(parsed.Nodes, "")
+		p.Kind = state.ProfileKindNodes
+		p.Config = nil
+		p.Sources = []state.ConfigSource{
+			{
+				ID:        state.NewID(),
+				URL:       p.Source,
+				Nodes:     cleaned,
+				UpdatedAt: time.Now().Unix(),
+			},
+		}
+		p.LastError = ""
+		state.TouchProfile(p)
+		appendRefreshEvent(p, p.Sources[0].ID, "succeeded", len(cleaned), nil)
+		return len(cleaned), nil
+	}
+	p.LastError = err.Error()
+	appendRefreshEvent(p, "subscription", "failed", 0, err)
+	return 0, err
 }
 
 func (a *App) refreshNodeProfile(ctx context.Context, p *state.ConfigProfile) (int, error) {

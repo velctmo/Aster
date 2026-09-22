@@ -36,7 +36,18 @@ find "$SCRIPTS_STAGE" -name '._*' -type f -delete
 pkgbuild --root "$STAGE" --scripts "$SCRIPTS_STAGE" --component-plist packaging/component.plist \
   --identifier app.aster --version "$ASTER_BUILD_VERSION" --install-location / build/Aster.pkg
 if pkgutil --payload-files build/Aster.pkg | grep -Eq '(^|/)\._'; then
-  echo "错误: PKG payload contains AppleDouble files" >&2
+  echo "  检测到 pkgbuild 注入了 AppleDouble (._*) 元数据，正在净化 Payload 与 Bom..."
+  CLEAN_TMP="$(mktemp -d build/pkg-clean.XXXXXX)"
+  pkgutil --expand build/Aster.pkg "$CLEAN_TMP/expanded"
+  bsdtar --format odc --no-mac-metadata --no-xattrs -czf "$CLEAN_TMP/expanded/Payload" -C "$STAGE" .
+  lsbom "$CLEAN_TMP/expanded/Bom" | grep -vE '(^|/)\._' > "$CLEAN_TMP/bom.txt"
+  mkbom -i "$CLEAN_TMP/bom.txt" "$CLEAN_TMP/expanded/Bom"
+  pkgutil --flatten "$CLEAN_TMP/expanded" build/Aster.pkg
+  rm -rf "$CLEAN_TMP"
+fi
+
+if pkgutil --payload-files build/Aster.pkg | grep -Eq '(^|/)\._'; then
+  echo "错误: PKG payload 包含 AppleDouble (._*) 元数据文件" >&2
   exit 1
 fi
 cp -f build/Aster.pkg build/Aster-unsigned.pkg

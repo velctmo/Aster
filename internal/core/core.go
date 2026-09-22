@@ -391,6 +391,7 @@ func FindBinary(configured string) (string, error) {
 			}
 			return path, nil
 		}
+		return "", fmt.Errorf("未找到配置的 sing-box 内核: %s", configured)
 	}
 	// 优先检查 App Bundle 内部 Resources 目录
 	if exe, err := os.Executable(); err == nil {
@@ -405,6 +406,26 @@ func FindBinary(configured string) (string, error) {
 	}
 	if dir, err := state.Dir(); err == nil {
 		if p := latestManaged(filepath.Join(dir, "cores")); p != "" {
+			return p, nil
+		}
+	}
+	// 检查系统级管理目录（由 PKG 安装器部署）
+	if p := latestManaged("/Library/Application Support/Aster/cores"); p != "" {
+		return p, nil
+	}
+	sysCore := "/Library/Application Support/Aster/cores/sing-box"
+	if st, err := os.Stat(sysCore); err == nil && !st.IsDir() && isArm64Binary(sysCore) {
+		return sysCore, nil
+	}
+	// 检查工程源码/测试环境中的 vendor/cores 目录
+	if p := latestManaged("vendor/cores"); p != "" {
+		return p, nil
+	}
+	if exe, err := os.Executable(); err == nil {
+		if p := latestManaged(filepath.Join(filepath.Dir(exe), "vendor", "cores")); p != "" {
+			return p, nil
+		}
+		if p := latestManaged(filepath.Join(filepath.Dir(exe), "..", "..", "vendor", "cores")); p != "" {
 			return p, nil
 		}
 	}
@@ -488,6 +509,9 @@ func latestManaged(coresDir string) string {
 			continue
 		}
 		p := filepath.Join(coresDir, name)
+		if abs, err := filepath.Abs(p); err == nil {
+			p = abs
+		}
 		if info.Mode()&0o111 == 0 {
 			continue
 		}

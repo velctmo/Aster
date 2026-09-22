@@ -219,7 +219,7 @@ public struct AddRuleModalView: View {
                 Spacer()
             }
             .padding(.horizontal, 20)
-            .padding(.top, 18)
+            .padding(.top, 16)
             .padding(.bottom, 14)
 
             Divider().opacity(0.3)
@@ -256,18 +256,14 @@ public struct AddRuleModalView: View {
                                 Button("选取 App…") {
                                     pickApplication()
                                 }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
+                                .buttonStyle(.exquisiteSecondary(height: 24))
                             }
                         }
                     }
 
                     // 辅助提示与自动提纯反显
                     if let tip = sanitizedTip {
-                        HStack(spacing: 4) {
-                            Image(systemName: "checkmark.circle.fill").foregroundColor(.green).font(.system(size: 10))
-                            Text(tip).font(.system(size: 10.5)).foregroundColor(.green)
-                        }
+                        InfoNoticeBanner(text: tip, icon: "checkmark.circle.fill", style: .success)
                     } else {
                         Text(selectedType.explanation)
                             .font(.system(size: 10.5))
@@ -275,10 +271,7 @@ public struct AddRuleModalView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                .padding(12)
-                .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
-                .cornerRadius(8)
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+                .asterSubcard(cornerRadius: 8, padding: 12)
 
                 // 流向指示箭头
                 HStack {
@@ -300,10 +293,31 @@ public struct AddRuleModalView: View {
                     }
 
                     // 常用动作三大胶囊
-                    HStack(spacing: 10) {
-                        actionCapsule(title: "DIRECT 直连", tag: "DIRECT", icon: "arrow.up.right", color: .green)
-                        actionCapsule(title: "PROXY 代理", tag: "PROXY", icon: "paperplane.fill", color: .accentColor)
-                        actionCapsule(title: "REJECT 拦截", tag: "REJECT", icon: "xmark.shield.fill", color: .red)
+                    HStack(spacing: 8) {
+                        SelectionCapsule(
+                            title: "DIRECT 直连",
+                            icon: "arrow.up.right",
+                            isSelected: selectedAction.uppercased() == "DIRECT",
+                            tintColor: .green
+                        ) {
+                            selectedAction = "DIRECT"
+                        }
+                        SelectionCapsule(
+                            title: "PROXY 代理",
+                            icon: "paperplane.fill",
+                            isSelected: selectedAction.uppercased() == "PROXY",
+                            tintColor: .accentColor
+                        ) {
+                            selectedAction = "PROXY"
+                        }
+                        SelectionCapsule(
+                            title: "REJECT 拦截",
+                            icon: "xmark.shield.fill",
+                            isSelected: selectedAction.uppercased() == "REJECT",
+                            tintColor: .red
+                        ) {
+                            selectedAction = "REJECT"
+                        }
                     }
 
                     // 自定义策略组与节点下拉选择器
@@ -335,10 +349,7 @@ public struct AddRuleModalView: View {
                         .frame(maxWidth: .infinity)
                     }
                 }
-                .padding(12)
-                .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
-                .cornerRadius(8)
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+                .asterSubcard(cornerRadius: 8, padding: 12)
 
                 // 阶段 3：插入优先级
                 HStack(spacing: 16) {
@@ -367,10 +378,16 @@ public struct AddRuleModalView: View {
                 // 实时预览徽章
                 HStack(spacing: 4) {
                     Text("预览:").font(.system(size: 10.5)).foregroundColor(.secondary)
-                    Text("\(selectedType.rawValue), \(cleanValue) ➔ \(selectedAction)")
+                    Text("\(selectedType.rawValue), \(cleanValue)")
                         .font(.system(size: 10.5, weight: .medium, design: .monospaced))
                         .foregroundColor(.primary.opacity(0.85))
                         .lineLimit(1)
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 8.5, weight: .bold))
+                        .foregroundColor(.secondary.opacity(0.7))
+                    Text(selectedAction)
+                        .font(.system(size: 10.5, weight: .bold, design: .monospaced))
+                        .foregroundColor(.primary)
                 }
 
                 Spacer()
@@ -382,6 +399,7 @@ public struct AddRuleModalView: View {
                 Button("取消") {
                     onDismiss()
                 }
+                .buttonStyle(.exquisiteSecondary(height: 28, cornerRadius: AsterMetrics.radiusControl))
                 .keyboardShortcut(.cancelAction)
                 .disabled(isSubmitting)
 
@@ -390,12 +408,12 @@ public struct AddRuleModalView: View {
                 } label: {
                     HStack(spacing: 4) {
                         if isSubmitting {
-                            ProgressView().controlSize(.small)
+                            ProgressView().controlSize(.mini).frame(width: 10, height: 10)
                         }
                         Text("添加规则")
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.exquisitePrimary(height: 28, cornerRadius: AsterMetrics.radiusControl))
                 .disabled(cleanValue.isEmpty || isSubmitting)
                 .keyboardShortcut(.defaultAction)
             }
@@ -404,7 +422,7 @@ public struct AddRuleModalView: View {
             .background(Color(NSColor.controlBackgroundColor).opacity(0.3))
         }
         .frame(width: 480)
-        .background(VisualEffectView(material: .popover, blendingMode: .behindWindow))
+        .unifiedWindowBackdrop(material: .popover, hasHairlineBorder: true)
     }
 
     private var cleanValue: String {
@@ -413,31 +431,6 @@ public struct AddRuleModalView: View {
 
     private var selectedActionIsQuick: Bool {
         ["DIRECT", "PROXY", "REJECT"].contains(selectedAction.uppercased())
-    }
-
-    private func actionCapsule(title: String, tag: String, icon: String, color: Color) -> some View {
-        let isSelected = selectedAction.uppercased() == tag
-        return Button {
-            selectedAction = tag
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.system(size: 10, weight: .bold))
-                Text(title)
-                    .font(.system(size: 11, weight: isSelected ? .bold : .medium))
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity)
-            .background(isSelected ? color.opacity(0.18) : Color.primary.opacity(0.04))
-            .foregroundColor(isSelected ? color : .secondary)
-            .cornerRadius(6)
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(isSelected ? color : Color.clear, lineWidth: 1)
-            )
-        }
-        .buttonStyle(.plain)
     }
 
     private func autoSanitizeInput(_ input: String) {
@@ -503,7 +496,7 @@ public class AddRuleWindowController: NSObject, NSWindowDelegate {
 
     public func show(context: AddRuleContext) {
         let targetWidth: CGFloat = 480
-        let targetHeight: CGFloat = 360
+        let targetHeight: CGFloat = 420
 
         if window == nil {
             let win = NSWindow(
@@ -515,6 +508,7 @@ public class AddRuleWindowController: NSObject, NSWindowDelegate {
             win.title = context.title
             win.titlebarAppearsTransparent = true
             win.titleVisibility = .hidden
+            win.titlebarSeparatorStyle = .none
             win.isMovableByWindowBackground = true
             win.backgroundColor = .clear
             win.isOpaque = false
@@ -526,7 +520,7 @@ public class AddRuleWindowController: NSObject, NSWindowDelegate {
 
         guard let win = self.window else { return }
         let rootView = AddRuleModalView(context: context) { [weak self] in
-            self?.window?.close()
+            self?.window?.orderOut(nil)
         }
 
         let hosting = NSHostingView(rootView: rootView)
@@ -536,5 +530,10 @@ public class AddRuleWindowController: NSObject, NSWindowDelegate {
         win.center()
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    public func windowShouldClose(_ sender: NSWindow) -> Bool {
+        sender.orderOut(nil)
+        return false
     }
 }

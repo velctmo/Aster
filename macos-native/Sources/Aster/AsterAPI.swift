@@ -244,6 +244,8 @@ public class AsterState: ObservableObject {
 
     @Published public var daemonError: String = ""
     @Published public var actionError: String?
+    @Published public var selectedTab: SidebarTab = .control
+    @Published public var activityFilterText: String = ""
     @Published public var lastActiveAppName: String = ""
     @Published public var lastActiveAppBundleId: String? = nil
     private var apiToken: String = ""
@@ -260,11 +262,6 @@ public class AsterState: ObservableObject {
         let title: String
         switch type { case .error: title = "Aster 操作失败"; case .warning: title = "Aster 提醒"; case .success: title = "Aster 完成"; case .info: title = "Aster" }
         AppDelegate.shared?.postSystemNotification(title: title, body: message, category: type.rawValue)
-    }
-
-    /// 兼容现有 showToast 调用，全量统一分发
-    public func showToast(message: String, isError: Bool = false) {
-        notify(message: message, type: isError ? .error : .success)
     }
 
     private func dataDirURL() -> URL {
@@ -499,6 +496,9 @@ public class AsterState: ObservableObject {
 
         let finalIcon = icon ?? NSWorkspace.shared.icon(for: .application)
         finalIcon.size = NSSize(width: size * 2, height: size * 2)
+        if iconCache.count >= 400 {
+            iconCache.removeAll(keepingCapacity: true)
+        }
         iconCache[key] = finalIcon
         return finalIcon
     }
@@ -633,16 +633,18 @@ public class AsterState: ObservableObject {
         Task { @MainActor [weak self] in
             guard let self else { return }
             while !self.pendingConnectionMutations.isEmpty {
-                let mutation = self.pendingConnectionMutations.removeFirst()
-                let previous = self.connectionSnapshot
-                let snapshot: ConnectionSnapshot
-                switch mutation {
-                case .snapshot(let response):
-                    snapshot = await Self.projectConnections(previous, replacingWith: response)
-                case .delta(let delta):
-                    snapshot = await Self.projectConnections(previous, applying: delta)
+                let mutations = self.pendingConnectionMutations
+                self.pendingConnectionMutations.removeAll(keepingCapacity: true)
+                var current = self.connectionSnapshot
+                for m in mutations {
+                    switch m {
+                    case .snapshot(let response):
+                        current = await Self.projectConnections(current, replacingWith: response)
+                    case .delta(let delta):
+                        current = await Self.projectConnections(current, applying: delta)
+                    }
                 }
-                self.applyConnectionSnapshot(snapshot)
+                self.applyConnectionSnapshot(current)
             }
             self.isProjectingConnectionMutations = false
         }
@@ -776,6 +778,7 @@ public class AsterState: ObservableObject {
             } else if let n = self.findNode(for: tag) {
                 self.status.selectedLabel = n.name
             }
+            triggerAutoFetchIP()
         }
         AppDelegate.shared?.refreshStatusMenu()
         Task { @MainActor in
@@ -801,6 +804,21 @@ public class AsterState: ObservableObject {
         } catch {}
     }
 
+    public func fetchProfileContent(id: String) async throws -> ProfileContentResponse {
+        guard let url = apiURL("/api/v1/configs/\(id)/content") else {
+            throw URLError(.badURL)
+        }
+        let (data, response) = try await apiData(for: authorizedRequest(url: url))
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        guard (200...299).contains(http.statusCode) else {
+            let errorMsg = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+            throw NSError(domain: "Aster", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: errorMsg])
+        }
+        return try JSONDecoder().decode(ProfileContentResponse.self, from: data)
+    }
+
     public func fetchRules() async {
         guard let url = apiURL("/api/v1/rules") else { return }
         do {
@@ -809,6 +827,31 @@ public class AsterState: ObservableObject {
             let decoded = try JSONDecoder().decode([RuleItem].self, from: data)
             self.rules = decoded
         } catch {}
+    }
+
+    public func evaluateRule(target: String, process: String? = nil, port: Int? = nil, network: String? = nil) async throws -> RuleEvaluateResult {
+        var queryItems: [URLQueryItem] = [
+            URLQueryItem(name: "target", value: target)
+        ]
+        if let process, !process.isEmpty {
+            queryItems.append(URLQueryItem(name: "process", value: process))
+        }
+        if let port {
+            queryItems.append(URLQueryItem(name: "port", value: String(port)))
+        }
+        if let network, !network.isEmpty {
+            queryItems.append(URLQueryItem(name: "network", value: network))
+        }
+
+        let (data, response) = try await apiGet("/api/v1/rules/evaluate", query: queryItems)
+        guard let http = response as? HTTPURLResponse else {
+            throw URLError(.badServerResponse)
+        }
+        guard (200...299).contains(http.statusCode) else {
+            let errorMsg = String(data: data, encoding: .utf8) ?? "HTTP \(http.statusCode)"
+            throw NSError(domain: "Aster", code: http.statusCode, userInfo: [NSLocalizedDescriptionKey: errorMsg])
+        }
+        return try JSONDecoder().decode(RuleEvaluateResult.self, from: data)
     }
 
     public func setMode(_ mode: String) {
@@ -866,19 +909,8 @@ public class AsterState: ObservableObject {
             do {
                 let (data, response) = try await apiData(for: authorizedRequest(url: url))
                 guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return }
-                // 1. 优先尝试解码最新的双 IP 结构
                 if let decoded = try? JSONDecoder().decode(DualIPInfo.self, from: data) {
                     self.dualIP = decoded
-                    return
-                }
-                // 2. 容灾兼容：若守护进程为旧版单 IP 格式
-                if let single = try? JSONDecoder().decode(IPInfo.self, from: data) {
-                    self.dualIP = DualIPInfo(
-                        localIP: single,
-                        proxyIP: single,
-                        protected: false,
-                        fetchedAt: single.fetchedAt
-                    )
                 }
             } catch {
                 print("获取双 IP 信息失败: \(error)")
@@ -907,15 +939,18 @@ public class AsterState: ObservableObject {
                     throw NSError(domain: "Aster", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message ?? "节点延迟测试失败"])
                 }
                 if let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-					if let message = obj["error"] as? String, !message.isEmpty {
-						throw NSError(domain: "Aster", code: -1, userInfo: [NSLocalizedDescriptionKey: message])
-					}
-					if let d = obj["delay"] as? Int, d > 0 {
-                    if let idx = self.nodes.firstIndex(where: { $0.tag == tag }) {
-                        self.nodes[idx].delayMs = d
+                    if let d = obj["delay"] as? Int {
+                        if let idx = self.nodes.firstIndex(where: { $0.tag == tag }) {
+                            self.nodes[idx].delayMs = d
+                        }
+                    }
+                    if let message = obj["error"] as? String, !message.isEmpty {
+                        if let idx = self.nodes.firstIndex(where: { $0.tag == tag }) {
+                            self.nodes[idx].delayMs = -1
+                        }
+                        throw NSError(domain: "Aster", code: -1, userInfo: [NSLocalizedDescriptionKey: message])
                     }
                 }
-				}
                 self.actionError = nil
             } catch {
                 self.actionError = error.localizedDescription
@@ -965,33 +1000,11 @@ public class AsterState: ObservableObject {
                         }
                     }
                     
-                    // 测速汇总统计：不针对任何单个节点报错，仅计算整体可用率与最优节点
-                    let testedNodes = self.nodes.filter { tags.contains($0.tag) }
-                    let totalCount = testedNodes.count
-                    let availableNodes = testedNodes.filter { $0.delayMs > 0 }
-                    let timeoutNodes = testedNodes.filter { $0.delayMs <= 0 }
-                    let availableCount = availableNodes.count
-                    let timeoutCount = timeoutNodes.count
 
-                    let summary: String
-                    let isSuccess: Bool
-                    if let best = availableNodes.min(by: { $0.delayMs < $1.delayMs }) {
-                        summary = "共测速 \(totalCount) 个节点：\(availableCount) 可用，\(timeoutCount) 超时。最优: \(best.name) (\(best.delayMs)ms)"
-                        isSuccess = true
-                    } else if totalCount > 0 {
-                        summary = "共测速 \(totalCount) 个节点：全部超时"
-                        isSuccess = false
-                    } else {
-                        summary = "暂无可测速节点"
-                        isSuccess = false
-                    }
 
-                    // 统一弹出最终汇总通知，持续 4.5 秒展示倒计时进度条
-                    self.notify(message: summary, type: isSuccess ? .success : .warning, duration: 4.5)
                 }
             } catch {
-                let errMsg = "批量测速请求异常：\(error.localizedDescription)"
-                self.notify(message: errMsg, type: .error)
+                self.actionError = "批量测速请求异常：\(error.localizedDescription)"
             }
             await self.fetchNodes()
             await self.fetchStatus()
@@ -1038,7 +1051,7 @@ public class AsterState: ObservableObject {
 
         Task { @MainActor in
             guard let url = apiURL("/api/v1/rules/from-log") else {
-                self.showToast(message: "控制平面服务未连接", isError: true)
+                self.actionError = "控制平面服务未连接"
                 return
             }
             var request = authorizedRequest(url: url, method: "POST")
@@ -1052,7 +1065,7 @@ public class AsterState: ObservableObject {
                 let (data, response) = try await apiData(for: request)
                 guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
                     let errMsg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-                    self.showToast(message: "规则注入失败: \(errMsg ?? "服务端拒绝")", isError: true)
+                    self.actionError = "规则注入失败: \(errMsg ?? "服务端拒绝")"
                     return
                 }
                 if let updatedRules = try? JSONDecoder().decode([RuleItem].self, from: data) {
@@ -1064,9 +1077,8 @@ public class AsterState: ObservableObject {
                 if let connId = connectionId, !connId.isEmpty {
                     self.closeConnection(connId)
                 }
-                self.showToast(message: "已注入分流规则: \(cleanTarget) → \(action.uppercased())")
             } catch {
-                self.showToast(message: "注入规则失败: \(error.localizedDescription)", isError: true)
+                self.actionError = "注入规则失败: \(error.localizedDescription)"
             }
         }
     }
@@ -1197,6 +1209,7 @@ public class AsterState: ObservableObject {
         panel.allowedContentTypes = [.json]
         guard panel.runModal() == .OK, let destination = panel.url else { return }
         try data.write(to: destination, options: .atomic)
+        NSWorkspace.shared.activateFileViewerSelecting([destination])
     }
 
     // MARK: - iCloud 多端云备份与恢复
@@ -1367,6 +1380,7 @@ public class AsterState: ObservableObject {
         panel.allowedContentTypes = [.zip]
         guard panel.runModal() == .OK, let destination = panel.url else { return }
         try data.write(to: destination, options: .atomic)
+        NSWorkspace.shared.activateFileViewerSelecting([destination])
     }
 
     public func importLocalBackup() async throws {
@@ -1409,6 +1423,16 @@ public class AsterState: ObservableObject {
             throw NSError(domain: "Aster", code: (response as? HTTPURLResponse)?.statusCode ?? -1, userInfo: [NSLocalizedDescriptionKey: message])
         }
         refreshAll()
+    }
+
+    // MARK: - 清空系统 DNS 缓存
+    public func flushDNSCache() {
+        triggerHaptic()
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/dscacheutil")
+        task.arguments = ["-flushcache"]
+        try? task.run()
+        task.waitUntilExit()
     }
 
     // MARK: - 重启整个 Aster 应用程序
@@ -1505,15 +1529,9 @@ public class AsterState: ObservableObject {
     public func refreshConfig(id: String) {
         triggerHaptic()
         updatingConfigIds.insert(id)
-        performConfigMutation("/api/v1/configs/\(id)/refresh", specificId: id) { [weak self] success, err in
+        performConfigMutation("/api/v1/configs/\(id)/refresh", specificId: id) { [weak self] _, _ in
             guard let self = self else { return }
             self.updatingConfigIds.remove(id)
-            if success {
-                let name = self.configs.first(where: { $0.id == id })?.name ?? "配置"
-                self.showToast(message: "已成功更新订阅: \(name)")
-            } else if let err = err {
-                self.showToast(message: "更新失败: \(err)", isError: true)
-            }
         }
     }
 
@@ -1521,15 +1539,10 @@ public class AsterState: ObservableObject {
         triggerHaptic()
         isRefreshingAllConfigs = true
         for c in configs { updatingConfigIds.insert(c.id) }
-        performConfigMutation("/api/v1/configs/refresh-all") { [weak self] success, err in
+        performConfigMutation("/api/v1/configs/refresh-all") { [weak self] _, _ in
             guard let self = self else { return }
             self.isRefreshingAllConfigs = false
             self.updatingConfigIds.removeAll()
-            if success {
-                self.showToast(message: "全部配置与订阅已更新完毕")
-            } else if let err = err {
-                self.showToast(message: "更新出现异常: \(err)", isError: true)
-            }
         }
     }
 
@@ -1712,7 +1725,6 @@ public class AsterState: ObservableObject {
                 code: (response as? HTTPURLResponse)?.statusCode ?? -1,
                 userInfo: [NSLocalizedDescriptionKey: errMsg ?? "添加规则失败"]
             )
-            self.showToast(message: "添加规则失败: \(err.localizedDescription)", isError: true)
             throw err
         }
         if let updatedRules = try? JSONDecoder().decode([RuleItem].self, from: data) {
@@ -1721,7 +1733,6 @@ public class AsterState: ObservableObject {
             await self.fetchRules()
         }
         await self.fetchStatus()
-        self.showToast(message: "已添加分流规则: \(cleanVal) → \(action.uppercased())")
     }
 
     public func addRule(match: String, value: String, action: String) {
@@ -1729,7 +1740,7 @@ public class AsterState: ObservableObject {
             do {
                 try await self.addRule(match: match, value: value, action: action)
             } catch {
-                // Toast 提示已在内部触发
+                self.actionError = error.localizedDescription
             }
         }
     }
@@ -1750,7 +1761,7 @@ public class AsterState: ObservableObject {
                     withAnimation {
                         self.rules = previousRules
                     }
-                    self.showToast(message: "删除规则失败: \(errMsg ?? "服务端拒绝")", isError: true)
+                    self.actionError = "删除规则失败: \(errMsg ?? "服务端拒绝")"
                     return
                 }
                 if let updatedRules = try? JSONDecoder().decode([RuleItem].self, from: data) {
@@ -1759,12 +1770,11 @@ public class AsterState: ObservableObject {
                     await self.fetchRules()
                 }
                 await self.fetchStatus()
-                self.showToast(message: "已删除分流规则")
             } catch {
                 withAnimation {
                     self.rules = previousRules
                 }
-                self.showToast(message: "删除规则失败: \(error.localizedDescription)", isError: true)
+                self.actionError = "删除规则失败: \(error.localizedDescription)"
             }
         }
     }
@@ -1790,7 +1800,6 @@ public class AsterState: ObservableObject {
             }
         } else {
             // Fail-Safe: 未探测到活跃网页时降级打开自定义规则弹窗，绝不展示空占位
-            self.showToast(message: "未检测到活跃网页，已打开自定义规则编辑", isError: false)
             let fallbackContext = AddRuleContext.forCustom(type: .domainSuffix, value: "", action: "DIRECT")
             DispatchQueue.main.async {
                 AddRuleWindowController.shared.show(context: fallbackContext)
@@ -2401,3 +2410,16 @@ private struct LogEventPayload: Codable {
         return route.isEmpty ? "\(origin) → \(destination)" : "\(origin) → \(destination) · \(route)"
     }
 }
+
+// MARK: - AsterAPIClient
+@MainActor
+public final class AsterAPIClient {
+    public static let shared = AsterAPIClient()
+
+    public init() {}
+
+    public func evaluateRule(target: String, process: String? = nil, port: Int? = nil, network: String? = nil) async throws -> RuleEvaluateResult {
+        try await AsterState.shared.evaluateRule(target: target, process: process, port: port, network: network)
+    }
+}
+

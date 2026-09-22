@@ -28,15 +28,24 @@ type Connections struct {
 	Connections   []Connection `json:"connections"`
 }
 
+type ConnectionDiagnostics struct {
+	DurationMs  int64  `json:"durationMs"`
+	SpeedIn     int64  `json:"speedIn"`
+	SpeedOut    int64  `json:"speedOut"`
+	CloseReason string `json:"closeReason"` // "active" | "completed" | "timeout" | "rejected" | "dns_failed" | "reset"
+	IsFailed    bool   `json:"isFailed"`
+}
+
 type Connection struct {
-	ID          string   `json:"id"`
-	Upload      int64    `json:"upload"`
-	Download    int64    `json:"download"`
-	Start       string   `json:"start"`
-	Chains      []string `json:"chains"`
-	Rule        string   `json:"rule"`
-	RulePayload string   `json:"rulePayload"`
-	Metadata    Metadata `json:"metadata"`
+	ID          string                `json:"id"`
+	Upload      int64                 `json:"upload"`
+	Download    int64                 `json:"download"`
+	Start       string                `json:"start"`
+	Chains      []string              `json:"chains"`
+	Rule        string                `json:"rule"`
+	RulePayload string                `json:"rulePayload"`
+	Metadata    Metadata              `json:"metadata"`
+	Diagnostics ConnectionDiagnostics `json:"diagnostics"`
 }
 
 type Metadata struct {

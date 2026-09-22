@@ -164,6 +164,14 @@ func Config(f state.File, dir string) ([]byte, error) {
 			endpoints = append(endpoints, buildWireGuardEndpoint(m, n.Tag))
 			continue
 		}
+		if typ == "shadowsocks" {
+			if p, ok := m["plugin"].(string); ok && p != "" {
+				switch strings.ToLower(strings.TrimSpace(p)) {
+				case "obfs", "simple-obfs":
+					m["plugin"] = "obfs-local"
+				}
+			}
+		}
 		if typ == "tuic" {
 			if cc, ok := m["congestion_controller"].(string); ok && cc != "" {
 				if _, has := m["congestion_control"]; !has {
@@ -194,9 +202,17 @@ func Config(f state.File, dir string) ([]byte, error) {
 	}
 	if f.Settings.DirectCN {
 		geositePath := filepath.Join(dir, "rules", "geosite-cn.srs")
+		geoipPath := filepath.Join(dir, "rules", "geoip-cn.srs")
+		var ruleSets []string
 		if _, err := os.Stat(geositePath); err == nil {
+			ruleSets = append(ruleSets, "geosite-cn")
+		}
+		if _, err := os.Stat(geoipPath); err == nil {
+			ruleSets = append(ruleSets, "geoip-cn")
+		}
+		if len(ruleSets) > 0 {
 			rules = append(rules, map[string]any{
-				"rule_set": []string{"geosite-cn", "geoip-cn"},
+				"rule_set": ruleSets,
 				"action":   "route",
 				"outbound": "direct",
 			})
@@ -213,22 +229,14 @@ func Config(f state.File, dir string) ([]byte, error) {
 		clashPort = state.DefaultClashPort
 	}
 	cfg := map[string]any{
-		"log": map[string]any{"level": f.Settings.LogLevel, "timestamp": true},
-		"dns": dnsBlock(f, nodeServers, dir),
-		// Remote rule-sets must always be downloaded directly: using the
-		// selected proxy here can form a startup dependency loop.  An HTTP
-		// client without a detour is direct; this is the sing-box 1.14
-		// replacement for the deprecated download_detour field.
-		"http_clients": []any{map[string]any{
-			"tag": "rule-set-direct",
-		}},
+		"log":       map[string]any{"level": f.Settings.LogLevel, "timestamp": true},
+		"dns":       dnsBlock(f, nodeServers, dir),
 		"inbounds":  inbounds,
 		"outbounds": outbounds,
 		"route": map[string]any{
 			"auto_detect_interface":   true,
 			"find_process":            true,
 			"default_domain_resolver": "bootstrap",
-			"default_http_client":     "rule-set-direct",
 			"rule_set": func() []any {
 				var rs []any
 				geositePath := filepath.Join(dir, "rules", "geosite-cn.srs")
@@ -258,7 +266,7 @@ func Config(f state.File, dir string) ([]byte, error) {
 			"clash_api": map[string]any{
 				"external_controller": fmt.Sprintf("127.0.0.1:%d", clashPort),
 				"secret":              f.ClashSecret,
-				"default_mode":        clashMode(f.Mode),
+				"default_mode":        state.ClashMode(f.Mode),
 			},
 			"cache_file": map[string]any{
 				"enabled":      true,
@@ -306,7 +314,7 @@ func Config(f state.File, dir string) ([]byte, error) {
 					clashAPI["secret"] = f.ClashSecret
 				}
 				if mode, _ := clashAPI["default_mode"].(string); mode == "" {
-					clashAPI["default_mode"] = clashMode(f.Mode)
+					clashAPI["default_mode"] = state.ClashMode(f.Mode)
 				}
 
 				// 2. 确保必须包含 mixed-in 本地代理入站
@@ -654,44 +662,44 @@ func dnsBlock(f state.File, nodeServers []string, dir string) map[string]any {
 			"server": "bootstrap",
 		})
 	}
-	geositePath := filepath.Join(dir, "rules", "geosite-cn.srs")
-	if _, err := os.Stat(geositePath); err == nil {
-		rules = append(rules, map[string]any{"rule_set": "geosite-cn", "server": "cn"})
-	} else {
-		rules = append(rules, map[string]any{
-			"domain_suffix": []string{".cn", ".cn.", "aliyun.com", "qq.com", "baidu.com", "jd.com", "taobao.com", "bilibili.com", "163.com", "douyin.com", "zhihu.com"},
-			"server":        "cn",
-		})
+	if f.Settings.DirectCN {
+		geositePath := filepath.Join(dir, "rules", "geosite-cn.srs")
+		if _, err := os.Stat(geositePath); err == nil {
+			rules = append(rules, map[string]any{"rule_set": "geosite-cn", "server": "cn"})
+		} else {
+			rules = append(rules, map[string]any{
+				"domain_suffix": []string{".cn", ".cn.", "aliyun.com", "qq.com", "baidu.com", "jd.com", "taobao.com", "bilibili.com", "163.com", "douyin.com", "zhihu.com"},
+				"server":        "cn",
+			})
+		}
 	}
 	if f.Settings.DNSMode != "redir-host" {
 		servers = append(servers, map[string]any{
 			"type":        "fakeip",
 			"tag":         "fakeip",
 			"inet4_range": "198.18.0.0/15",
-			"inet6_range": "fc00::/18",
 		})
 		rules = append(rules, map[string]any{
 			"inbound":    []string{"mixed-in", "tun-in"},
-			"query_type": []string{"A", "AAAA"},
+			"query_type": []string{"A"},
 			"server":     "fakeip",
 		})
+	}
+	// Drop unreachable IPv6 AAAA queries (TUN is IPv4 only) and HTTPS/SVCB Type 65 queries
+	// to prevent leaking domain lookups to cleartext China DNS or causing Safari IPv6 connection timeouts.
+	rules = append(rules, map[string]any{
+		"query_type": []string{"AAAA", "HTTPS", "SVCB"},
+		"action":     "reject",
+	})
+	finalServer := "cn"
+	if f.Settings.DNSMode == "redir-host" {
+		finalServer = "remote"
 	}
 	return map[string]any{
 		"servers":  servers,
 		"rules":    rules,
-		"final":    "cn",
+		"final":    finalServer,
 		"strategy": "ipv4_only",
-	}
-}
-
-func clashMode(mode string) string {
-	switch mode {
-	case "global":
-		return "Global"
-	case "direct":
-		return "Direct"
-	default:
-		return "Rule"
 	}
 }
 

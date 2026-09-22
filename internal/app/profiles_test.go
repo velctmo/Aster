@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -929,4 +930,141 @@ func portableArchive(t *testing.T, file state.File, mutate func(*portableBackup)
 		t.Fatal(err)
 	}
 	return archive
+}
+
+func TestCreateSubscriptionProfile_AutoAdaptNonJSON(t *testing.T) {
+	t.Setenv("ASTER_DATA_DIR", t.TempDir())
+	a, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. Clash YAML
+	clash := `
+proxies:
+  - name: clash-ss
+    type: ss
+    server: 1.2.3.4
+    port: 8388
+    cipher: aes-128-gcm
+    password: pwd
+`
+	if err := a.CreateSubscriptionProfile("Clash 订阅测试", "", clash); err != nil {
+		t.Fatalf("CreateSubscriptionProfile with Clash YAML failed: %v", err)
+	}
+	profiles := a.Store().Get().Profiles
+	foundClash := false
+	for _, p := range profiles {
+		if p.Name == "Clash 订阅测试" {
+			foundClash = true
+			if p.Kind != state.ProfileKindNodes {
+				t.Fatalf("expected ProfileKindNodes, got %s", p.Kind)
+			}
+			if len(p.ManualNodes) != 1 || p.ManualNodes[0].Name != "clash-ss" {
+				t.Fatalf("unexpected nodes: %+v", p.ManualNodes)
+			}
+		}
+	}
+	if !foundClash {
+		t.Fatal("Clash profile not found")
+	}
+
+	// 2. Base64 URI list
+	b64 := base64.StdEncoding.EncodeToString([]byte("trojan://password123@example.com:443#trojan-b64\n"))
+	if err := a.CreateSubscriptionProfile("Base64 订阅测试", "", b64); err != nil {
+		t.Fatalf("CreateSubscriptionProfile with Base64 failed: %v", err)
+	}
+	profiles = a.Store().Get().Profiles
+	foundB64 := false
+	for _, p := range profiles {
+		if p.Name == "Base64 订阅测试" {
+			foundB64 = true
+			if p.Kind != state.ProfileKindNodes {
+				t.Fatalf("expected ProfileKindNodes, got %s", p.Kind)
+			}
+			if len(p.ManualNodes) != 1 || p.ManualNodes[0].Name != "trojan-b64" {
+				t.Fatalf("unexpected nodes: %+v", p.ManualNodes)
+			}
+		}
+	}
+	if !foundB64 {
+		t.Fatal("Base64 profile not found")
+	}
+
+	// 3. sing-box JSON
+	sbJSON := `{"outbounds":[{"type":"direct","tag":"direct"}]}`
+	if err := a.CreateSubscriptionProfile("sing-box JSON测试", "", sbJSON); err != nil {
+		t.Fatalf("CreateSubscriptionProfile with sing-box JSON failed: %v", err)
+	}
+	profiles = a.Store().Get().Profiles
+	foundSB := false
+	for _, p := range profiles {
+		if p.Name == "sing-box JSON测试" {
+			foundSB = true
+			if p.Kind != state.ProfileKindSubscription {
+				t.Fatalf("expected ProfileKindSubscription, got %s", p.Kind)
+			}
+		}
+	}
+	if !foundSB {
+		t.Fatal("sing-box profile not found")
+	}
+}
+
+func TestProfileContent(t *testing.T) {
+	t.Setenv("ASTER_DATA_DIR", t.TempDir())
+	a, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := `{"outbounds":[{"type":"shadowsocks","tag":"ss-node","server":"1.2.3.4","server_port":8388,"method":"aes-128-gcm","password":"pwd"},{"type":"direct","tag":"direct"}],"route":{"final":"direct"}}`
+	if err := a.CreateSubscriptionProfile("完整配置内容测试", "", raw); err != nil {
+		t.Fatal(err)
+	}
+	profiles := a.Store().Get().Profiles
+	var subID string
+	for _, p := range profiles {
+		if p.Name == "完整配置内容测试" {
+			subID = p.ID
+			break
+		}
+	}
+	if subID == "" {
+		t.Fatal("profile not found")
+	}
+
+	content, err := a.ProfileContent(subID)
+	if err != nil {
+		t.Fatalf("ProfileContent error: %v", err)
+	}
+	if content.ID != subID || content.Format != "json" {
+		t.Fatalf("unexpected content meta: %+v", content)
+	}
+	if !strings.Contains(content.Content, `"tag": "ss-node"`) {
+		t.Fatalf("content missing ss-node: %s", content.Content)
+	}
+	if content.NodeCount != 1 {
+		t.Fatalf("expected nodeCount=1, got %d", content.NodeCount)
+	}
+
+	// Set active profile in store and check Nodes()
+	if _, err := a.Store().Update(func(cur *state.File) error {
+		cur.ActiveConfigID = subID
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nodes := a.Nodes()
+	foundSS := false
+	for _, n := range nodes {
+		if n.Tag == "ss-node" {
+			foundSS = true
+			if n.Protocol != "shadowsocks" {
+				t.Fatalf("expected protocol shadowsocks, got %s", n.Protocol)
+			}
+		}
+	}
+	if !foundSS {
+		t.Fatalf("expected ss-node in Nodes(), got: %+v", nodes)
+	}
 }
